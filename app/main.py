@@ -18,12 +18,12 @@ from typing import AsyncIterator
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware import Middleware
-from starlette.middleware.body_limit import RequestBodyLimitMiddleware
 
 from app.core import assets, bootstrap, config, config_live, db, graceful, housekeeping, jobs, language, live_reload, logs, server_lock
-from app.core import sse
+from app.core import runner, sse
 from app.core.maintenance import Maintenance
-from app.core.middleware import EXCEPTION_HANDLERS, AppVersion, NoStore, RateLimit, SecurityHeaders
+from app.core.config import FILE_CHUNK_BYTES
+from app.core.middleware import EXCEPTION_HANDLERS, AppVersion, BodyLimit, NoStore, RateLimit, SecurityHeaders
 from app.core.request_id import RequestID
 from app.core.request_log import RequestLog
 from app.core.security import LoadActor, ViewOnly
@@ -75,6 +75,10 @@ def build_app(
     registry = jobs.Registry(store, logger)
     housekeeping.register(registry, store, settings, logger)
     log_hub = sse.Hub()
+    # The Library and Runs screens hear here when an import has been looked
+    # at or a run moves (app/core/runner.py). One stream per open page.
+    work_hub = sse.Hub(max_clients=64)
+    work = runner.Runner(store, settings, work_hub)
 
     @asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
@@ -86,14 +90,17 @@ def build_app(
             logger.system(logs.LEVEL_WARN, "secret key moved to secret.key", {"config": str(cfg.config_file), "secret": str(cfg.secret_file)})
         watcher = asyncio.create_task(config_watch(settings))
         registry.start()
+        work.start(loop)
         try:
             yield
         finally:
             # By now requests have finished and streams have ended (serve's
             # on_stop). Jobs next, since they write to the log; the log last.
             watcher.cancel()
+            work.stop()
             await registry.stop()
             log_hub.close()
+            work_hub.close()
             logger.on_flushed = None
             logger.system(logs.LEVEL_INFO, "server stopped")
             await run_in_threadpool(logger.close)
@@ -113,7 +120,7 @@ def build_app(
             Middleware(NoStore),
             Middleware(AppVersion, version=version),
             Middleware(SecurityHeaders, settings=settings),
-            Middleware(RequestBodyLimitMiddleware, max_body_size=cfg.body_limit_bytes),
+            Middleware(BodyLimit, max_body_size=cfg.body_limit_bytes, chunk_body_size=FILE_CHUNK_BYTES),
             Middleware(RateLimit, settings=settings, logger=logger),
             Middleware(LoadActor, store=store, settings=settings),
             Middleware(RequestLog, settings=settings, logger=logger),
@@ -128,6 +135,8 @@ def build_app(
     app.state.logs = logger
     app.state.jobs = registry
     app.state.log_hub = log_hub
+    app.state.work_hub = work_hub
+    app.state.runner = work
     app.state.language = lang
     # Reported to MCP clients as serverInfo.version.
     app.state.version = version
@@ -190,6 +199,8 @@ def serve(version: str) -> None:
         """Before uvicorn waits for connections: it would otherwise wait the
         full 10 seconds for a request that is never going to finish."""
         app.state.log_hub.close()
+        app.state.work_hub.close()
+        app.state.runner.stop()
         if reload_watcher is not None:
             reload_watcher.close()
 

@@ -170,6 +170,10 @@
       },
       "File": {
         "properties": {
+          "bookmarks": {
+            "description": "Bookmarks in all.",
+            "type": "integer"
+          },
           "chunks": {
             "type": "integer"
           },
@@ -177,14 +181,63 @@
             "format": "date-time",
             "type": "string"
           },
+          "encrypted": {
+            "type": "boolean"
+          },
+          "expires_at": {
+            "description": "When retention removes it; null keeps it.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "folder": {
+            "description": "The folder it was dropped in with, relative to what was dropped.",
+            "type": "string"
+          },
           "id": {
             "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "import",
+              "output"
+            ],
+            "type": "string"
+          },
+          "levels": {
+            "description": "How many bookmarks sit at each level, from the top.",
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
           },
           "name": {
             "type": "string"
           },
+          "pages": {
+            "type": "integer"
+          },
+          "pdf_error": {
+            "description": "Why it could not be read: not_pdf, password or damaged.",
+            "type": "string"
+          },
+          "pdf_state": {
+            "description": "pending until the first look has run.",
+            "enum": [
+              "pending",
+              "ok",
+              "invalid"
+            ],
+            "type": "string"
+          },
           "received": {
             "type": "integer"
+          },
+          "run_id": {
+            "description": "For an output, the run that made it.",
+            "type": "string"
           },
           "size": {
             "type": "integer"
@@ -196,18 +249,32 @@
             ],
             "type": "string"
           },
+          "title": {
+            "type": "string"
+          },
           "type": {
             "type": "string"
           }
         },
         "required": [
+          "bookmarks",
           "chunks",
           "created_at",
+          "encrypted",
+          "expires_at",
+          "folder",
           "id",
+          "kind",
+          "levels",
           "name",
+          "pages",
+          "pdf_error",
+          "pdf_state",
           "received",
+          "run_id",
           "size",
           "state",
+          "title",
           "type"
         ],
         "type": "object"
@@ -1519,6 +1586,252 @@
         ]
       }
     },
+    "/api/account/retention": {
+      "get": {
+        "description": "Your own choice, what applies after the limit, and the policy everyone gets.",
+        "operationId": "get_api_account_retention",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "effective_import_days": {
+                      "description": "What applies to your imports; 0 is until deleted.",
+                      "type": "integer"
+                    },
+                    "effective_output_days": {
+                      "description": "What applies to what actions make for you.",
+                      "type": "integer"
+                    },
+                    "import_days": {
+                      "description": "Your choice for imports; null follows the default.",
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "output_days": {
+                      "description": "Your choice for what actions make; null follows the default.",
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "policy": {
+                      "properties": {
+                        "import_days": {
+                          "description": "How long imports are kept unless an account says otherwise.",
+                          "type": "integer"
+                        },
+                        "max_days": {
+                          "description": "The longest anyone may keep anything; 0 is no limit.",
+                          "type": "integer"
+                        },
+                        "output_days": {
+                          "description": "How long what actions make is kept unless an account says otherwise.",
+                          "type": "integer"
+                        },
+                        "updated_at": {
+                          "format": "date-time",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "import_days",
+                        "max_days",
+                        "output_days",
+                        "updated_at"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "effective_import_days",
+                    "effective_output_days",
+                    "import_days",
+                    "output_days",
+                    "policy"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "How long your files are kept",
+        "tags": [
+          "Retention"
+        ]
+      },
+      "post": {
+        "description": "Each is clamped to the limit an admin set. Every one of your files gets its expiry worked out again from its import date.",
+        "operationId": "post_api_account_retention",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "import_days": {
+                    "description": "null follows the default everyone gets.",
+                    "maximum": 3650,
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "output_days": {
+                    "description": "null follows the default everyone gets.",
+                    "maximum": 3650,
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "effective_import_days": {
+                      "description": "What applies to your imports; 0 is until deleted.",
+                      "type": "integer"
+                    },
+                    "effective_output_days": {
+                      "description": "What applies to what actions make for you.",
+                      "type": "integer"
+                    },
+                    "import_days": {
+                      "description": "Your choice for imports; null follows the default.",
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "output_days": {
+                      "description": "Your choice for what actions make; null follows the default.",
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "policy": {
+                      "properties": {
+                        "import_days": {
+                          "description": "How long imports are kept unless an account says otherwise.",
+                          "type": "integer"
+                        },
+                        "max_days": {
+                          "description": "The longest anyone may keep anything; 0 is no limit.",
+                          "type": "integer"
+                        },
+                        "output_days": {
+                          "description": "How long what actions make is kept unless an account says otherwise.",
+                          "type": "integer"
+                        },
+                        "updated_at": {
+                          "format": "date-time",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "import_days",
+                        "max_days",
+                        "output_days",
+                        "updated_at"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "effective_import_days",
+                    "effective_output_days",
+                    "import_days",
+                    "output_days",
+                    "policy"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Choose how long your files are kept",
+        "tags": [
+          "Retention"
+        ]
+      },
+      "x-feature": "files"
+    },
     "/api/account/sessions": {
       "get": {
         "description": "Where your account is signed in, a page at a time: id, when it started and was last seen, the browser, and the name you gave it. Through an API key no device is current. next is the offset of the following page, or null on the last one.",
@@ -2456,6 +2769,286 @@
       },
       "x-feature": "two_factor"
     },
+    "/api/actions": {
+      "get": {
+        "description": "Each action and its options with their defaults. Words for them are in language.yaml under actions.<name>.",
+        "operationId": "get_api_actions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "actions": {
+                      "items": {
+                        "properties": {
+                          "defaults": {
+                            "description": "Every option and the value it has unless one is sent.",
+                            "type": "object"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "needs_bookmarks": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "defaults",
+                          "name",
+                          "needs_bookmarks"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "actions"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "What can be done to a PDF",
+        "tags": [
+          "Actions"
+        ]
+      },
+      "x-feature": "files"
+    },
+    "/api/actions/{action}/start": {
+      "post": {
+        "description": "One run per file, in one request: what a dropped folder needs. A file that cannot take the action is listed in skipped with why, and the rest still start.",
+        "operationId": "post_api_actions_action_start",
+        "parameters": [
+          {
+            "description": "An action's name, from GET /api/actions.",
+            "in": "path",
+            "name": "action",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "file_ids": {
+                    "description": "Your imported PDFs, up to 1000.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 1000,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "options": {
+                    "description": "The action's options, the same for every file.",
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "file_ids"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "runs": {
+                      "items": {
+                        "properties": {
+                          "action": {
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "file_id": {
+                            "type": "string"
+                          },
+                          "file_name": {
+                            "type": "string"
+                          },
+                          "finished_at": {
+                            "format": "date-time",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "description": "Why it failed, as a code.",
+                            "type": "string"
+                          },
+                          "options": {
+                            "type": "object"
+                          },
+                          "output_bytes": {
+                            "type": "integer"
+                          },
+                          "outputs": {
+                            "description": "How many of the files it made are still here.",
+                            "type": "integer"
+                          },
+                          "progress": {
+                            "description": "0 to 1.",
+                            "type": "number"
+                          },
+                          "result": {
+                            "description": "What it reported when done, such as how many sections.",
+                            "type": "object"
+                          },
+                          "started_at": {
+                            "format": "date-time",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "state": {
+                            "enum": [
+                              "queued",
+                              "running",
+                              "done",
+                              "failed",
+                              "cancelled"
+                            ],
+                            "type": "string"
+                          },
+                          "step": {
+                            "description": "What it is doing now: the file it is writing.",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "action",
+                          "created_at",
+                          "file_id",
+                          "file_name",
+                          "finished_at",
+                          "id",
+                          "message",
+                          "options",
+                          "output_bytes",
+                          "outputs",
+                          "progress",
+                          "result",
+                          "started_at",
+                          "state",
+                          "step"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "skipped": {
+                      "items": {
+                        "properties": {
+                          "error": {
+                            "description": "Why it was not started: no such file, not_readable, no_bookmarks.",
+                            "type": "string"
+                          },
+                          "file_id": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "error",
+                          "file_id"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "runs",
+                    "skipped"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Start an action on many PDFs",
+        "tags": [
+          "Actions"
+        ]
+      },
+      "x-feature": "files"
+    },
     "/api/admin/files": {
       "get": {
         "description": "Every account's files, a page at a time, with whose each one is (user_id, user_name). next is the offset of the following page, or null on the last one.",
@@ -2525,6 +3118,10 @@
                     "files": {
                       "items": {
                         "properties": {
+                          "bookmarks": {
+                            "description": "Bookmarks in all.",
+                            "type": "integer"
+                          },
                           "chunks": {
                             "type": "integer"
                           },
@@ -2532,14 +3129,63 @@
                             "format": "date-time",
                             "type": "string"
                           },
+                          "encrypted": {
+                            "type": "boolean"
+                          },
+                          "expires_at": {
+                            "description": "When retention removes it; null keeps it.",
+                            "format": "date-time",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "folder": {
+                            "description": "The folder it was dropped in with, relative to what was dropped.",
+                            "type": "string"
+                          },
                           "id": {
                             "type": "string"
+                          },
+                          "kind": {
+                            "enum": [
+                              "import",
+                              "output"
+                            ],
+                            "type": "string"
+                          },
+                          "levels": {
+                            "description": "How many bookmarks sit at each level, from the top.",
+                            "items": {
+                              "type": "integer"
+                            },
+                            "type": "array"
                           },
                           "name": {
                             "type": "string"
                           },
+                          "pages": {
+                            "type": "integer"
+                          },
+                          "pdf_error": {
+                            "description": "Why it could not be read: not_pdf, password or damaged.",
+                            "type": "string"
+                          },
+                          "pdf_state": {
+                            "description": "pending until the first look has run.",
+                            "enum": [
+                              "pending",
+                              "ok",
+                              "invalid"
+                            ],
+                            "type": "string"
+                          },
                           "received": {
                             "type": "integer"
+                          },
+                          "run_id": {
+                            "description": "For an output, the run that made it.",
+                            "type": "string"
                           },
                           "size": {
                             "type": "integer"
@@ -2549,6 +3195,9 @@
                               "uploading",
                               "ready"
                             ],
+                            "type": "string"
+                          },
+                          "title": {
                             "type": "string"
                           },
                           "type": {
@@ -2562,13 +3211,24 @@
                           }
                         },
                         "required": [
+                          "bookmarks",
                           "chunks",
                           "created_at",
+                          "encrypted",
+                          "expires_at",
+                          "folder",
                           "id",
+                          "kind",
+                          "levels",
                           "name",
+                          "pages",
+                          "pdf_error",
+                          "pdf_state",
                           "received",
+                          "run_id",
                           "size",
                           "state",
+                          "title",
                           "type",
                           "user_id",
                           "user_name"
@@ -2951,6 +3611,193 @@
         "summary": "Put back a deleted file",
         "tags": [
           "Files"
+        ],
+        "x-required-role": "admin"
+      },
+      "x-feature": "files"
+    },
+    "/api/admin/retention": {
+      "get": {
+        "operationId": "get_api_admin_retention",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "import_days": {
+                      "description": "How long imports are kept unless an account says otherwise.",
+                      "type": "integer"
+                    },
+                    "max_days": {
+                      "description": "The longest anyone may keep anything; 0 is no limit.",
+                      "type": "integer"
+                    },
+                    "output_days": {
+                      "description": "How long what actions make is kept unless an account says otherwise.",
+                      "type": "integer"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "import_days",
+                    "max_days",
+                    "output_days",
+                    "updated_at"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "The retention policy",
+        "tags": [
+          "Retention"
+        ],
+        "x-required-role": "admin"
+      },
+      "post": {
+        "description": "A default over the limit is kept as typed and applied up to the limit. Every file's expiry is worked out again, so lowering the limit shortens everyone's at once; files already past it go to the bin on the next retention run.",
+        "operationId": "post_api_admin_retention",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "import_days": {
+                    "description": "0 keeps until deleted (or up to the limit, when there is one).",
+                    "maximum": 3650,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "max_days": {
+                    "description": "0 is no limit.",
+                    "maximum": 3650,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "output_days": {
+                    "description": "0 keeps until deleted (or up to the limit, when there is one).",
+                    "maximum": 3650,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "import_days",
+                  "max_days",
+                  "output_days"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "import_days": {
+                      "description": "How long imports are kept unless an account says otherwise.",
+                      "type": "integer"
+                    },
+                    "max_days": {
+                      "description": "The longest anyone may keep anything; 0 is no limit.",
+                      "type": "integer"
+                    },
+                    "output_days": {
+                      "description": "How long what actions make is kept unless an account says otherwise.",
+                      "type": "integer"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "import_days",
+                    "max_days",
+                    "output_days",
+                    "updated_at"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Set the retention policy",
+        "tags": [
+          "Retention"
         ],
         "x-required-role": "admin"
       },
@@ -5743,7 +6590,7 @@
         ]
       },
       "post": {
-        "description": "Then send each piece in order and finish. A file over files.max_file_bytes, or one that would pass files.quota_bytes_per_user, is a 409.",
+        "description": "Then send every piece, in any order and several at once, and finish. A file over files.max_file_bytes, or one that would pass files.quota_bytes_per_user, is a 409.",
         "operationId": "post_api_files",
         "requestBody": {
           "content": {
@@ -5753,6 +6600,10 @@
                 "properties": {
                   "csrf_token": {
                     "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "folder": {
+                    "description": "The folder it came in, relative to a dropped folder: shown, never a path on disk.",
                     "type": "string"
                   },
                   "name": {
@@ -5783,6 +6634,10 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "bookmarks": {
+                      "description": "Bookmarks in all.",
+                      "type": "integer"
+                    },
                     "chunk_bytes": {
                       "description": "Every piece but the last is exactly this long.",
                       "type": "integer"
@@ -5794,14 +6649,70 @@
                       "format": "date-time",
                       "type": "string"
                     },
+                    "encrypted": {
+                      "type": "boolean"
+                    },
+                    "expires_at": {
+                      "description": "When retention removes it; null keeps it.",
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "folder": {
+                      "description": "The folder it was dropped in with, relative to what was dropped.",
+                      "type": "string"
+                    },
                     "id": {
                       "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "import",
+                        "output"
+                      ],
+                      "type": "string"
+                    },
+                    "levels": {
+                      "description": "How many bookmarks sit at each level, from the top.",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "type": "array"
+                    },
+                    "missing": {
+                      "description": "The pieces still to send, in any order: where to resume.",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "type": "array"
                     },
                     "name": {
                       "type": "string"
                     },
+                    "pages": {
+                      "type": "integer"
+                    },
+                    "pdf_error": {
+                      "description": "Why it could not be read: not_pdf, password or damaged.",
+                      "type": "string"
+                    },
+                    "pdf_state": {
+                      "description": "pending until the first look has run.",
+                      "enum": [
+                        "pending",
+                        "ok",
+                        "invalid"
+                      ],
+                      "type": "string"
+                    },
                     "received": {
                       "type": "integer"
+                    },
+                    "run_id": {
+                      "description": "For an output, the run that made it.",
+                      "type": "string"
                     },
                     "size": {
                       "type": "integer"
@@ -5813,19 +6724,34 @@
                       ],
                       "type": "string"
                     },
+                    "title": {
+                      "type": "string"
+                    },
                     "type": {
                       "type": "string"
                     }
                   },
                   "required": [
+                    "bookmarks",
                     "chunk_bytes",
                     "chunks",
                     "created_at",
+                    "encrypted",
+                    "expires_at",
+                    "folder",
                     "id",
+                    "kind",
+                    "levels",
+                    "missing",
                     "name",
+                    "pages",
+                    "pdf_error",
+                    "pdf_state",
                     "received",
+                    "run_id",
                     "size",
                     "state",
+                    "title",
                     "type"
                   ],
                   "type": "object"
@@ -5873,7 +6799,7 @@
     },
     "/api/files/{file_id}": {
       "get": {
-        "description": "One file: its details, and for an unfinished upload how many pieces have arrived (received), which is where to resume.",
+        "description": "One file: its details, and for an unfinished upload which pieces are still to send (missing), which is where to resume.",
         "operationId": "get_api_files_file_id",
         "parameters": [
           {
@@ -5892,6 +6818,10 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "bookmarks": {
+                      "description": "Bookmarks in all.",
+                      "type": "integer"
+                    },
                     "chunk_bytes": {
                       "description": "Every piece but the last is exactly this long.",
                       "type": "integer"
@@ -5903,14 +6833,70 @@
                       "format": "date-time",
                       "type": "string"
                     },
+                    "encrypted": {
+                      "type": "boolean"
+                    },
+                    "expires_at": {
+                      "description": "When retention removes it; null keeps it.",
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "folder": {
+                      "description": "The folder it was dropped in with, relative to what was dropped.",
+                      "type": "string"
+                    },
                     "id": {
                       "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "import",
+                        "output"
+                      ],
+                      "type": "string"
+                    },
+                    "levels": {
+                      "description": "How many bookmarks sit at each level, from the top.",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "type": "array"
+                    },
+                    "missing": {
+                      "description": "The pieces still to send, in any order: where to resume.",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "type": "array"
                     },
                     "name": {
                       "type": "string"
                     },
+                    "pages": {
+                      "type": "integer"
+                    },
+                    "pdf_error": {
+                      "description": "Why it could not be read: not_pdf, password or damaged.",
+                      "type": "string"
+                    },
+                    "pdf_state": {
+                      "description": "pending until the first look has run.",
+                      "enum": [
+                        "pending",
+                        "ok",
+                        "invalid"
+                      ],
+                      "type": "string"
+                    },
                     "received": {
                       "type": "integer"
+                    },
+                    "run_id": {
+                      "description": "For an output, the run that made it.",
+                      "type": "string"
                     },
                     "size": {
                       "type": "integer"
@@ -5922,19 +6908,34 @@
                       ],
                       "type": "string"
                     },
+                    "title": {
+                      "type": "string"
+                    },
                     "type": {
                       "type": "string"
                     }
                   },
                   "required": [
+                    "bookmarks",
                     "chunk_bytes",
                     "chunks",
                     "created_at",
+                    "encrypted",
+                    "expires_at",
+                    "folder",
                     "id",
+                    "kind",
+                    "levels",
+                    "missing",
                     "name",
+                    "pages",
+                    "pdf_error",
+                    "pdf_state",
                     "received",
+                    "run_id",
                     "size",
                     "state",
+                    "title",
                     "type"
                   ],
                   "type": "object"
@@ -5974,9 +6975,187 @@
       },
       "x-feature": "files"
     },
+    "/api/files/{file_id}/actions/{action}": {
+      "post": {
+        "description": "Queues a run and answers it. A file that is not a readable PDF, or one with no bookmarks for an action that needs them, is a 409.",
+        "operationId": "post_api_files_file_id_actions_action",
+        "parameters": [
+          {
+            "description": "One of your imported PDFs.",
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "An action's name, from GET /api/actions.",
+            "in": "path",
+            "name": "action",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "options": {
+                    "description": "The action's options; any left out take their default.",
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "file_id": {
+                      "type": "string"
+                    },
+                    "file_name": {
+                      "type": "string"
+                    },
+                    "finished_at": {
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "description": "Why it failed, as a code.",
+                      "type": "string"
+                    },
+                    "options": {
+                      "type": "object"
+                    },
+                    "output_bytes": {
+                      "type": "integer"
+                    },
+                    "outputs": {
+                      "description": "How many of the files it made are still here.",
+                      "type": "integer"
+                    },
+                    "progress": {
+                      "description": "0 to 1.",
+                      "type": "number"
+                    },
+                    "result": {
+                      "description": "What it reported when done, such as how many sections.",
+                      "type": "object"
+                    },
+                    "started_at": {
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "state": {
+                      "enum": [
+                        "queued",
+                        "running",
+                        "done",
+                        "failed",
+                        "cancelled"
+                      ],
+                      "type": "string"
+                    },
+                    "step": {
+                      "description": "What it is doing now: the file it is writing.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "action",
+                    "created_at",
+                    "file_id",
+                    "file_name",
+                    "finished_at",
+                    "id",
+                    "message",
+                    "options",
+                    "output_bytes",
+                    "outputs",
+                    "progress",
+                    "result",
+                    "started_at",
+                    "state",
+                    "step"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Start an action on a PDF",
+        "tags": [
+          "Actions"
+        ]
+      },
+      "x-feature": "files"
+    },
     "/api/files/{file_id}/chunks/{index}": {
       "post": {
-        "description": "The body is the raw bytes. Pieces go in order, from 0. A browser session sends its csrf token in the X-CSRF-Token header. A 409 carries received, the piece to send next. Counts against server.rate_limit_upload_max.",
+        "description": "The body is the raw bytes. Pieces may come in any order and several at once; sending one that already arrived is harmless. A browser session sends its csrf token in the X-CSRF-Token header. Counts against server.rate_limit_upload_max.",
         "operationId": "post_api_files_file_id_chunks_index",
         "parameters": [
           {
@@ -6066,11 +7245,11 @@
             "apiKey": []
           }
         ],
-        "summary": "Send the next piece of an upload",
+        "summary": "Send one piece of an upload",
         "tags": [
           "Files"
         ],
-        "x-mcp-http": "File bytes: MCP messages are JSON, and clients cap their size. files_start_upload says where to send each piece, with the same key."
+        "x-mcp-http": "File bytes: MCP messages are JSON, and clients cap their size."
       },
       "x-feature": "files"
     },
@@ -7709,6 +8888,804 @@
         ]
       }
     },
+    "/api/runs": {
+      "get": {
+        "description": "Newest first unless sorted: each run, how far it has got, and how many files it made.",
+        "operationId": "get_api_runs",
+        "parameters": [
+          {
+            "description": "Rows to return. Default 200.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip: the next value of the previous page.",
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Keep runs whose file name contains this, in any case.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Field to sort the whole list by.",
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "enum": [
+                "file_name",
+                "state",
+                "created_at"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Default asc.",
+            "in": "query",
+            "name": "dir",
+            "schema": {
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "next": {
+                      "description": "Offset of the next page, or null on the last one.",
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "runs": {
+                      "items": {
+                        "properties": {
+                          "action": {
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "file_id": {
+                            "type": "string"
+                          },
+                          "file_name": {
+                            "type": "string"
+                          },
+                          "finished_at": {
+                            "format": "date-time",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "description": "Why it failed, as a code.",
+                            "type": "string"
+                          },
+                          "options": {
+                            "type": "object"
+                          },
+                          "output_bytes": {
+                            "type": "integer"
+                          },
+                          "outputs": {
+                            "description": "How many of the files it made are still here.",
+                            "type": "integer"
+                          },
+                          "progress": {
+                            "description": "0 to 1.",
+                            "type": "number"
+                          },
+                          "result": {
+                            "description": "What it reported when done, such as how many sections.",
+                            "type": "object"
+                          },
+                          "started_at": {
+                            "format": "date-time",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "state": {
+                            "enum": [
+                              "queued",
+                              "running",
+                              "done",
+                              "failed",
+                              "cancelled"
+                            ],
+                            "type": "string"
+                          },
+                          "step": {
+                            "description": "What it is doing now: the file it is writing.",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "action",
+                          "created_at",
+                          "file_id",
+                          "file_name",
+                          "finished_at",
+                          "id",
+                          "message",
+                          "options",
+                          "output_bytes",
+                          "outputs",
+                          "progress",
+                          "result",
+                          "started_at",
+                          "state",
+                          "step"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "next",
+                    "runs",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "List your runs",
+        "tags": [
+          "Actions"
+        ]
+      },
+      "x-feature": "files"
+    },
+    "/api/runs/stream": {
+      "get": {
+        "description": "Server-sent events: \"runs\" when a run moves, \"files\" when an import has been read. Each only says something changed; fetch the list again.",
+        "operationId": "get_api_runs_stream",
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Hear when your runs or files change",
+        "tags": [
+          "Actions"
+        ]
+      },
+      "x-feature": "files"
+    },
+    "/api/runs/{run_id}": {
+      "get": {
+        "description": "The run and the files it made, in order.",
+        "operationId": "get_api_runs_run_id",
+        "parameters": [
+          {
+            "description": "The run's id, from GET /api/runs.",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "file_id": {
+                      "type": "string"
+                    },
+                    "file_name": {
+                      "type": "string"
+                    },
+                    "files": {
+                      "items": {
+                        "$ref": "#/components/schemas/File"
+                      },
+                      "type": "array"
+                    },
+                    "finished_at": {
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "description": "Why it failed, as a code.",
+                      "type": "string"
+                    },
+                    "options": {
+                      "type": "object"
+                    },
+                    "output_bytes": {
+                      "type": "integer"
+                    },
+                    "outputs": {
+                      "description": "How many of the files it made are still here.",
+                      "type": "integer"
+                    },
+                    "progress": {
+                      "description": "0 to 1.",
+                      "type": "number"
+                    },
+                    "result": {
+                      "description": "What it reported when done, such as how many sections.",
+                      "type": "object"
+                    },
+                    "started_at": {
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "state": {
+                      "enum": [
+                        "queued",
+                        "running",
+                        "done",
+                        "failed",
+                        "cancelled"
+                      ],
+                      "type": "string"
+                    },
+                    "step": {
+                      "description": "What it is doing now: the file it is writing.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "action",
+                    "created_at",
+                    "file_id",
+                    "file_name",
+                    "files",
+                    "finished_at",
+                    "id",
+                    "message",
+                    "options",
+                    "output_bytes",
+                    "outputs",
+                    "progress",
+                    "result",
+                    "started_at",
+                    "state",
+                    "step"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "One of your runs",
+        "tags": [
+          "Actions"
+        ]
+      },
+      "x-feature": "files"
+    },
+    "/api/runs/{run_id}/cancel": {
+      "post": {
+        "description": "A queued run is cancelled at once, a running one at its next step; what it made so far goes to the bin.",
+        "operationId": "post_api_runs_run_id_cancel",
+        "parameters": [
+          {
+            "description": "The run's id, from GET /api/runs.",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Cancel a run",
+        "tags": [
+          "Actions"
+        ]
+      },
+      "x-feature": "files"
+    },
+    "/api/runs/{run_id}/delete": {
+      "post": {
+        "description": "The run and every file it made go to the bin, and can be restored for ten minutes. A run still going is cancelled first.",
+        "operationId": "post_api_runs_run_id_delete",
+        "parameters": [
+          {
+            "description": "The run's id, from GET /api/runs.",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Delete a run",
+        "tags": [
+          "Actions"
+        ]
+      },
+      "x-feature": "files"
+    },
+    "/api/runs/{run_id}/download": {
+      "get": {
+        "operationId": "get_api_runs_run_id_download",
+        "parameters": [
+          {
+            "description": "The run's id, from GET /api/runs.",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "A zip of the run's files, stored as they are, always as an attachment"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Download everything a run made",
+        "tags": [
+          "Actions"
+        ]
+      },
+      "x-feature": "files"
+    },
+    "/api/runs/{run_id}/restore": {
+      "post": {
+        "description": "Brings back a run you deleted, with its files, while they are still in the bin.",
+        "operationId": "post_api_runs_run_id_restore",
+        "parameters": [
+          {
+            "description": "The run's id, from GET /api/runs.",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "file_id": {
+                      "type": "string"
+                    },
+                    "file_name": {
+                      "type": "string"
+                    },
+                    "finished_at": {
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "description": "Why it failed, as a code.",
+                      "type": "string"
+                    },
+                    "options": {
+                      "type": "object"
+                    },
+                    "output_bytes": {
+                      "type": "integer"
+                    },
+                    "outputs": {
+                      "description": "How many of the files it made are still here.",
+                      "type": "integer"
+                    },
+                    "progress": {
+                      "description": "0 to 1.",
+                      "type": "number"
+                    },
+                    "result": {
+                      "description": "What it reported when done, such as how many sections.",
+                      "type": "object"
+                    },
+                    "started_at": {
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "state": {
+                      "enum": [
+                        "queued",
+                        "running",
+                        "done",
+                        "failed",
+                        "cancelled"
+                      ],
+                      "type": "string"
+                    },
+                    "step": {
+                      "description": "What it is doing now: the file it is writing.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "action",
+                    "created_at",
+                    "file_id",
+                    "file_name",
+                    "finished_at",
+                    "id",
+                    "message",
+                    "options",
+                    "output_bytes",
+                    "outputs",
+                    "progress",
+                    "result",
+                    "started_at",
+                    "state",
+                    "step"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Restore a deleted run",
+        "tags": [
+          "Actions"
+        ]
+      },
+      "x-feature": "files"
+    },
     "/api/team": {
       "get": {
         "description": "People with an active account, a page at a time: id and display name.",
@@ -7815,6 +9792,12 @@
     },
     {
       "name": "Monitoring"
+    },
+    {
+      "name": "Actions"
+    },
+    {
+      "name": "Retention"
     }
   ]
 }

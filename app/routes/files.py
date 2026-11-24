@@ -1,10 +1,12 @@
-"""Uploaded files. How they are stored is in app/models/files.py; here is who
-may do what. Everyone has their own, and someone else's answers 404, like a key
+"""Imported PDFs and the files actions make. How they are stored is in
+app/models/files.py; here is who may do what. Everyone has their own, and someone else's answers 404, like a key
 that is not yours. Admins have their own routes for everyone's, and one opening
 a file that is not theirs is written to the log.
 
-An upload is three steps, so that every request stays under the global body
-limit: POST /api/files, one POST per piece, then POST .../finish.
+An upload is three steps, so that no request carries more than one piece:
+POST /api/files, one POST per piece (in any order, several at once), then POST
+.../finish. Finishing hands the file to the runner for a first look: is it a
+PDF, how many pages, how deep its bookmarks go.
 
 A piece's body is the raw bytes, so its csrf token cannot ride in the body like
 everywhere else, and comes in the X-CSRF-Token header instead.
@@ -18,7 +20,7 @@ from urllib.parse import quote
 import msgspec
 from msgspec import UNSET, Meta, UnsetType
 from starlette.requests import ClientDisconnect, Request
-from starlette.responses import Response, StreamingResponse
+from starlette.responses import FileResponse, Response, StreamingResponse
 
 from app.apidocs import ADMIN, PATH, QUERY, SESSION_ONLY, Reply, route
 from app.apidocs import Request as RequestType
@@ -27,6 +29,7 @@ from app.core.logs import KIND_ADMIN
 from app.core.security import Guard, actor_from
 from app.models import RestoreError, to_iso
 from app.models import files as models
+from app.models import retention
 from app.models import users
 from app.routes.admin import OkReply
 from app.routes.helpers import DateTime, Dir, Page, Paged, Refused, get_config, get_store, match_rows, not_found, restore_refusal, run, sorted_page
@@ -60,6 +63,17 @@ class File(Reply):
     chunks: int
     received: int
     created_at: DateTime
+    folder: Annotated[str, Meta(description="The folder it was dropped in with, relative to what was dropped.")]
+    kind: Literal["import", "output"]
+    encrypted: bool
+    pdf_state: Annotated[Literal["pending", "ok", "invalid"], Meta(description="pending until the first look has run.")]
+    pdf_error: Annotated[str, Meta(description="Why it could not be read: not_pdf, password or damaged.")]
+    pages: int
+    title: str
+    bookmarks: Annotated[int, Meta(description="Bookmarks in all.")]
+    levels: Annotated[list[int], Meta(description="How many bookmarks sit at each level, from the top.")]
+    expires_at: Annotated[DateTime | None, Meta(description="When retention removes it; null keeps it.")]
+    run_id: Annotated[str, Meta(description="For an output, the run that made it.")]
 
 
 class FileUpload(File):
@@ -68,6 +82,7 @@ class FileUpload(File):
 
     api_name: ClassVar[str] = ""
     chunk_bytes: Annotated[int, Meta(description="Every piece but the last is exactly this long.")]
+    missing: Annotated[list[int], Meta(description="The pieces still to send, in any order: where to resume.")]
 
 
 class OwnedFile(File):
@@ -81,6 +96,7 @@ class OwnedFile(File):
 def _row(file: models.File) -> File:
     """Picks the fields by hand, so the sealed key cannot reach a response by
     way of a change to the model."""
+    info = file.pdf or {}
     return File(
         id=file.id,
         name=file.name,
@@ -90,11 +106,23 @@ def _row(file: models.File) -> File:
         chunks=file.chunks,
         received=file.received,
         created_at=to_iso(file.created_at),
+        folder=file.folder,
+        kind=file.kind,  # type: ignore[arg-type]
+        encrypted=file.encrypted,
+        pdf_state=file.pdf_state,  # type: ignore[arg-type]
+        pdf_error=file.pdf_error,
+        pages=int(info.get("pages", 0)),
+        title=str(info.get("title", "")),
+        bookmarks=int(info.get("bookmarks", 0)),
+        levels=[int(count) for count in info.get("levels", [])],
+        expires_at=to_iso(file.expires_at),
+        run_id=file.run_id,
     )
 
 
 def _upload_row(file: models.File) -> FileUpload:
-    return FileUpload(**msgspec.structs.asdict(_row(file)), chunk_bytes=FILE_CHUNK_BYTES)
+    missing = file.missing() if file.state == models.UPLOADING else []
+    return FileUpload(**msgspec.structs.asdict(_row(file)), chunk_bytes=FILE_CHUNK_BYTES, missing=missing)
 
 
 def content_disposition(name: str) -> str:
@@ -237,19 +265,24 @@ class CreateFile(RequestType):
     name: Annotated[str, Meta(extra={"error": BAD_FILE})]
     size: Annotated[int, Meta(ge=0, extra={"error": BAD_FILE})]
     type: Annotated[str, Meta(description="Shown in the list. Downloads are always application/octet-stream.")] = ""
+    folder: Annotated[str, Meta(description="The folder it came in, relative to a dropped folder: shown, never a path on disk.")] = ""
 
 
 @route(
     "POST /api/files", summary="Start an upload",
     tag="Files", feature="files", status=201, errors=(409,),
-    description="Then send each piece in order and finish. A file over files.max_file_bytes, or one that "
+    description="Then send every piece, in any order and several at once, and finish. A file over files.max_file_bytes, or one that "
     "would pass files.quota_bytes_per_user, is a 409.",
     reply_description="Created",
 )
 def create_file(request: Request, body: CreateFile) -> FileUpload:
     """Start an upload, over HTTP and as the MCP files_start_upload tool."""
+    store, user_id = get_store(request), actor_from(request).user.id
     try:
-        file = models.create_file(get_store(request), get_config(request), actor_from(request).user.id, body.name, body.type, body.size)
+        file = models.create_file(
+            store, get_config(request), user_id, body.name, body.type, body.size,
+            folder=body.folder, expires_at=retention.expiry_for(store, user_id, models.KIND_IMPORT),
+        )
     except models.BadFileError as refusal:
         raise Refused(400, str(refusal)) from None
     except (models.FileTooLargeError, models.FileQuotaError) as refusal:
@@ -260,12 +293,11 @@ def create_file(request: Request, body: CreateFile) -> FileUpload:
 @route(
     "GET /api/files/{file_id}", summary="One of your files",
     tag="Files", feature="files",
-    description="One file: its details, and for an unfinished upload how many pieces have arrived "
-    "(received), which is where to resume.",
+    description="One file: its details, and for an unfinished upload which pieces are still to send "
+    "(missing), which is where to resume.",
 )
 def get_my_file(request: Request, body: FileIDPath) -> FileUpload:
-    """How a client finds out where to resume: see received. Over HTTP and as
-    the MCP files_get tool."""
+    """How a client finds out where to resume: see missing."""
     file = _mine(request, body.file_id)
     if file is None:
         raise Refused(404, NO_SUCH_FILE)
@@ -282,28 +314,27 @@ class PutChunkReply(Reply):
 
 
 @route(
-    "POST /api/files/{file_id}/chunks/{index}", summary="Send the next piece of an upload",
+    "POST /api/files/{file_id}/chunks/{index}", summary="Send one piece of an upload",
     tag="Files", feature="files", errors=(409,), body_type="application/octet-stream",
-    description="The body is the raw bytes. Pieces go in order, from 0. A browser session sends its csrf "
-    "token in the X-CSRF-Token header. A 409 carries received, the piece to send next. Counts against "
-    "server.rate_limit_upload_max.",
-    mcp_http="File bytes: MCP messages are JSON, and clients cap their size. files_start_upload says where "
-    "to send each piece, with the same key.",
+    description="The body is the raw bytes. Pieces may come in any order and several at once; sending one "
+    "that already arrived is harmless. A browser session sends its csrf token in the X-CSRF-Token header. "
+    "Counts against server.rate_limit_upload_max.",
+    mcp_http="File bytes: MCP messages are JSON, and clients cap their size.",
 )
 async def put_chunk(request: Request, body: PutChunk) -> PutChunkReply:
-    """Take the next piece. Out of order is a 409 carrying received, which is
-    also what a retry of a piece that did arrive gets: the client goes on from
-    there. The body is the raw bytes, so its csrf token comes in the
-    X-CSRF-Token header, which @route checks (body_type)."""
+    """Take one piece. Two requests for the same piece at once: the second is
+    a 409, and its retry finds the piece there. The body is the raw bytes, so
+    its csrf token comes in the X-CSRF-Token header, which @route checks
+    (body_type)."""
     index = body.index
-    if not _locks.hold(body.file_id):
-        raise Refused(409, "another request is writing this upload")
+    if not _locks.hold(body.file_id, index):
+        raise Refused(409, "another request is writing this piece")
     try:
         file = await run(_mine, request, body.file_id)
         if file is None:
             raise Refused(404, NO_SUCH_FILE)
-        if file.state != models.UPLOADING or index != file.received:
-            raise Refused(409, "that is not the next piece", received=file.received)
+        if file.state != models.UPLOADING:
+            raise Refused(409, "that upload is finished", received=file.received)
         if index >= file.chunks:
             raise Refused(400, "bad piece number")
         try:
@@ -311,14 +342,14 @@ async def put_chunk(request: Request, body: PutChunk) -> PutChunkReply:
         except ClientDisconnect:
             raise Refused(400, "the piece did not arrive") from None
         try:
-            await run(models.write_chunk, get_store(request), get_config(request), file, index, piece)
+            received = await run(models.write_chunk, get_store(request), get_config(request), file, index, piece)
         except models.ChunkSizeError as refusal:
             raise Refused(400, str(refusal)) from None
         except models.FileMissingError:
             raise Refused(404, LOST) from None
-        return PutChunkReply(received=index + 1)
+        return PutChunkReply(received=received)
     finally:
-        _locks.release(body.file_id)
+        _locks.release(body.file_id, index)
 
 
 @route(
@@ -330,7 +361,7 @@ async def put_chunk(request: Request, body: PutChunk) -> PutChunkReply:
 def finish_file(request: Request, body: FileIDPath) -> File:
     """Seal an upload whose pieces have all arrived, over HTTP and as the MCP
     files_finish_upload tool."""
-    if not _locks.hold(body.file_id):
+    if not _locks.hold(body.file_id, -1):
         raise Refused(409, "another request is writing this upload")
     try:
         file = _mine(request, body.file_id)
@@ -340,27 +371,44 @@ def finish_file(request: Request, body: FileIDPath) -> File:
         if file.state == models.READY:
             return _row(file)
         if file.received != file.chunks:
-            raise Refused(409, "some of the file has not arrived", received=file.received)
+            raise Refused(409, "some of the file has not arrived", received=file.received, missing=file.missing()[:1000])
         try:
             finished = models.finish_file(get_store(request), get_config(request), file)
         except models.FileMissingError:
             raise Refused(404, LOST) from None
     finally:
-        _locks.release(body.file_id)
+        _locks.release(body.file_id, -1)
+    request.app.state.runner.look_at(finished.id)
     audit(request, KIND_ADMIN, "file uploaded", {"file_id": finished.id, "size": finished.size})
     return _row(finished)
 
 
 async def _send(request: Request, file: models.File) -> Response:
-    """Stream a finished file. It is only ever an attachment of an opaque type:
+    """Send a finished file. It is only ever an attachment of an opaque type:
     nosniff is on every response, and nothing the uploader said about the file
     reaches the headers except its cleaned name.
 
-    Starlette walks the reader in a worker thread, so the reads and the
-    decryption stay off the event loop. The fixed length means a piece that fails
-    to open ends the connection short rather than looking complete."""
+    A plain file goes straight from disk (Starlette's FileResponse), with
+    ranges, so a large download can be resumed. An encrypted one is opened a
+    piece at a time: Starlette walks the reader in a worker thread, so the
+    reads and the decryption stay off the event loop, and the fixed length
+    means a piece that fails to open ends the connection short rather than
+    looking complete."""
     if file.state != models.READY:
         raise Refused(404, NO_SUCH_FILE)
+    if not file.encrypted:
+        path = models.readable_path(get_config(request), file)
+        try:
+            stat = await run(path.stat)
+        except FileNotFoundError:
+            raise Refused(404, NO_SUCH_FILE) from None
+        if stat.st_size != file.size:
+            print(f"[files] file {file.id} has a record but not the right data on disk", flush=True)
+            raise Refused(404, NO_SUCH_FILE)
+        return FileResponse(
+            path, stat_result=stat, media_type="application/octet-stream",
+            headers={"Content-Disposition": content_disposition(file.name), "Cache-Control": "private, no-store"},
+        )
     try:
         reader = await run(models.FileReader, get_config(request), file)
     except models.FileMissingError:

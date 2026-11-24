@@ -14,6 +14,8 @@ This file is generated: do not edit it. Change the docs next to the handlers and
 - [Admin](#admin)
 - [Owner](#owner)
 - [Monitoring](#monitoring)
+- [Actions](#actions)
+- [Retention](#retention)
 - [Schemas](#schemas)
 
 ## Calling the API
@@ -580,7 +582,7 @@ Finish a sign-in with a code
 | GET | [`/api/files`](#get-apifiles) | List your files | browser session or API key, anyone signed in |
 | POST | [`/api/files`](#post-apifiles) | Start an upload | browser session or API key, anyone signed in |
 | GET | [`/api/files/{file_id}`](#get-apifilesfile_id) | One of your files | browser session or API key, anyone signed in |
-| POST | [`/api/files/{file_id}/chunks/{index}`](#post-apifilesfile_idchunksindex) | Send the next piece of an upload | browser session or API key, anyone signed in |
+| POST | [`/api/files/{file_id}/chunks/{index}`](#post-apifilesfile_idchunksindex) | Send one piece of an upload | browser session or API key, anyone signed in |
 | POST | [`/api/files/{file_id}/delete`](#post-apifilesfile_iddelete) | Delete a file | browser session or API key, anyone signed in |
 | GET | [`/api/files/{file_id}/download`](#get-apifilesfile_iddownload) | Download one of your files | browser session or API key, anyone signed in |
 | POST | [`/api/files/{file_id}/finish`](#post-apifilesfile_idfinish) | Finish an upload | browser session or API key, anyone signed in |
@@ -631,13 +633,24 @@ Every account's files, a page at a time, with whose each one is (user_id, user_n
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `files` | array of object | yes |  |  |
+| `files[].bookmarks` | integer | yes |  | Bookmarks in all. |
 | `files[].chunks` | integer | yes |  |  |
 | `files[].created_at` | string (date-time) | yes |  |  |
+| `files[].encrypted` | boolean | yes |  |  |
+| `files[].expires_at` | string (date-time) or null | yes |  | When retention removes it; null keeps it. |
+| `files[].folder` | string | yes |  | The folder it was dropped in with, relative to what was dropped. |
 | `files[].id` | string | yes |  |  |
+| `files[].kind` | string | yes | one of `import`, `output` |  |
+| `files[].levels` | array of integer | yes |  | How many bookmarks sit at each level, from the top. |
 | `files[].name` | string | yes |  |  |
+| `files[].pages` | integer | yes |  |  |
+| `files[].pdf_error` | string | yes |  | Why it could not be read: not_pdf, password or damaged. |
+| `files[].pdf_state` | string | yes | one of `pending`, `ok`, `invalid` | pending until the first look has run. |
 | `files[].received` | integer | yes |  |  |
+| `files[].run_id` | string | yes |  | For an output, the run that made it. |
 | `files[].size` | integer | yes |  |  |
 | `files[].state` | string | yes | one of `uploading`, `ready` |  |
+| `files[].title` | string | yes |  |  |
 | `files[].type` | string | yes |  |  |
 | `files[].user_id` | integer | yes |  |  |
 | `files[].user_name` | string | yes |  |  |
@@ -847,7 +860,7 @@ Your uploaded files, a page at a time: id, name, type, size, state (uploading or
 
 Start an upload
 
-Then send each piece in order and finish. A file over files.max_file_bytes, or one that would pass files.quota_bytes_per_user, is a 409.
+Then send every piece, in any order and several at once, and finish. A file over files.max_file_bytes, or one that would pass files.quota_bytes_per_user, is a 409.
 
 |  |  |
 |---|---|
@@ -859,6 +872,7 @@ Then send each piece in order and finish. A file over files.max_file_bytes, or o
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `folder` | string | no |  | The folder it came in, relative to a dropped folder: shown, never a path on disk. |
 | `name` | string | yes |  |  |
 | `size` | integer | yes | at least 0 |  |
 | `type` | string | no |  | Shown in the list. Downloads are always application/octet-stream. |
@@ -867,21 +881,33 @@ Then send each piece in order and finish. A file over files.max_file_bytes, or o
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
+| `bookmarks` | integer | yes |  | Bookmarks in all. |
 | `chunk_bytes` | integer | yes |  | Every piece but the last is exactly this long. |
 | `chunks` | integer | yes |  |  |
 | `created_at` | string (date-time) | yes |  |  |
+| `encrypted` | boolean | yes |  |  |
+| `expires_at` | string (date-time) or null | yes |  | When retention removes it; null keeps it. |
+| `folder` | string | yes |  | The folder it was dropped in with, relative to what was dropped. |
 | `id` | string | yes |  |  |
+| `kind` | string | yes | one of `import`, `output` |  |
+| `levels` | array of integer | yes |  | How many bookmarks sit at each level, from the top. |
+| `missing` | array of integer | yes |  | The pieces still to send, in any order: where to resume. |
 | `name` | string | yes |  |  |
+| `pages` | integer | yes |  |  |
+| `pdf_error` | string | yes |  | Why it could not be read: not_pdf, password or damaged. |
+| `pdf_state` | string | yes | one of `pending`, `ok`, `invalid` | pending until the first look has run. |
 | `received` | integer | yes |  |  |
+| `run_id` | string | yes |  | For an output, the run that made it. |
 | `size` | integer | yes |  |  |
 | `state` | string | yes | one of `uploading`, `ready` |  |
+| `title` | string | yes |  |  |
 | `type` | string | yes |  |  |
 
 ### GET /api/files/{file_id}
 
 One of your files
 
-One file: its details, and for an unfinished upload how many pieces have arrived (received), which is where to resume.
+One file: its details, and for an unfinished upload which pieces are still to send (missing), which is where to resume.
 
 |  |  |
 |---|---|
@@ -898,21 +924,33 @@ One file: its details, and for an unfinished upload how many pieces have arrived
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
+| `bookmarks` | integer | yes |  | Bookmarks in all. |
 | `chunk_bytes` | integer | yes |  | Every piece but the last is exactly this long. |
 | `chunks` | integer | yes |  |  |
 | `created_at` | string (date-time) | yes |  |  |
+| `encrypted` | boolean | yes |  |  |
+| `expires_at` | string (date-time) or null | yes |  | When retention removes it; null keeps it. |
+| `folder` | string | yes |  | The folder it was dropped in with, relative to what was dropped. |
 | `id` | string | yes |  |  |
+| `kind` | string | yes | one of `import`, `output` |  |
+| `levels` | array of integer | yes |  | How many bookmarks sit at each level, from the top. |
+| `missing` | array of integer | yes |  | The pieces still to send, in any order: where to resume. |
 | `name` | string | yes |  |  |
+| `pages` | integer | yes |  |  |
+| `pdf_error` | string | yes |  | Why it could not be read: not_pdf, password or damaged. |
+| `pdf_state` | string | yes | one of `pending`, `ok`, `invalid` | pending until the first look has run. |
 | `received` | integer | yes |  |  |
+| `run_id` | string | yes |  | For an output, the run that made it. |
 | `size` | integer | yes |  |  |
 | `state` | string | yes | one of `uploading`, `ready` |  |
+| `title` | string | yes |  |  |
 | `type` | string | yes |  |  |
 
 ### POST /api/files/{file_id}/chunks/{index}
 
-Send the next piece of an upload
+Send one piece of an upload
 
-The body is the raw bytes. Pieces go in order, from 0. A browser session sends its csrf token in the X-CSRF-Token header. A 409 carries received, the piece to send next. Counts against server.rate_limit_upload_max.
+The body is the raw bytes. Pieces may come in any order and several at once; sending one that already arrived is harmless. A browser session sends its csrf token in the X-CSRF-Token header. Counts against server.rate_limit_upload_max.
 
 |  |  |
 |---|---|
@@ -2055,6 +2093,466 @@ Can the server do real work
 |---|---|---|---|---|
 | `ok` | boolean | yes |  |  |
 
+## Actions
+
+| Method | Path | Summary | Who may call |
+|---|---|---|---|
+| GET | [`/api/actions`](#get-apiactions) | What can be done to a PDF | browser session or API key, anyone signed in |
+| POST | [`/api/actions/{action}/start`](#post-apiactionsactionstart) | Start an action on many PDFs | browser session or API key, anyone signed in |
+| POST | [`/api/files/{file_id}/actions/{action}`](#post-apifilesfile_idactionsaction) | Start an action on a PDF | browser session or API key, anyone signed in |
+| GET | [`/api/runs`](#get-apiruns) | List your runs | browser session or API key, anyone signed in |
+| GET | [`/api/runs/stream`](#get-apirunsstream) | Hear when your runs or files change | browser session or API key, anyone signed in |
+| GET | [`/api/runs/{run_id}`](#get-apirunsrun_id) | One of your runs | browser session or API key, anyone signed in |
+| POST | [`/api/runs/{run_id}/cancel`](#post-apirunsrun_idcancel) | Cancel a run | browser session or API key, anyone signed in |
+| POST | [`/api/runs/{run_id}/delete`](#post-apirunsrun_iddelete) | Delete a run | browser session or API key, anyone signed in |
+| GET | [`/api/runs/{run_id}/download`](#get-apirunsrun_iddownload) | Download everything a run made | browser session or API key, anyone signed in |
+| POST | [`/api/runs/{run_id}/restore`](#post-apirunsrun_idrestore) | Restore a deleted run | browser session or API key, anyone signed in |
+
+### GET /api/actions
+
+What can be done to a PDF
+
+Each action and its options with their defaults. Words for them are in language.yaml under actions.<name>.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 401, 404, 429, 503 |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `actions` | array of object | yes |  |  |
+| `actions[].defaults` | object | yes |  | Every option and the value it has unless one is sent. |
+| `actions[].name` | string | yes |  |  |
+| `actions[].needs_bookmarks` | boolean | yes |  |  |
+
+### POST /api/actions/{action}/start
+
+Start an action on many PDFs
+
+One run per file, in one request: what a dropped folder needs. A file that cannot take the action is listed in skipped with why, and the rest still start.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `action` | path | string | yes |  | An action's name, from GET /api/actions. |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `file_ids` | array of string | yes |  | Your imported PDFs, up to 1000. |
+| `options` | object | no |  | The action's options, the same for every file. |
+
+**Reply 201**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `runs` | array of object | yes |  |  |
+| `runs[].action` | string | yes |  |  |
+| `runs[].created_at` | string (date-time) | yes |  |  |
+| `runs[].file_id` | string | yes |  |  |
+| `runs[].file_name` | string | yes |  |  |
+| `runs[].finished_at` | string (date-time) or null | yes |  |  |
+| `runs[].id` | string | yes |  |  |
+| `runs[].message` | string | yes |  | Why it failed, as a code. |
+| `runs[].options` | object | yes |  |  |
+| `runs[].output_bytes` | integer | yes |  |  |
+| `runs[].outputs` | integer | yes |  | How many of the files it made are still here. |
+| `runs[].progress` | number | yes |  | 0 to 1. |
+| `runs[].result` | object | yes |  | What it reported when done, such as how many sections. |
+| `runs[].started_at` | string (date-time) or null | yes |  |  |
+| `runs[].state` | string | yes | one of `queued`, `running`, `done`, `failed`, `cancelled` |  |
+| `runs[].step` | string | yes |  | What it is doing now: the file it is writing. |
+| `skipped` | array of object | yes |  |  |
+| `skipped[].error` | string | yes |  | Why it was not started: no such file, not_readable, no_bookmarks. |
+| `skipped[].file_id` | string | yes |  |  |
+
+### POST /api/files/{file_id}/actions/{action}
+
+Start an action on a PDF
+
+Queues a run and answers it. A file that is not a readable PDF, or one with no bookmarks for an action that needs them, is a 409.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 403, 404, 409, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `file_id` | path | string | yes |  | One of your imported PDFs. |
+| `action` | path | string | yes |  | An action's name, from GET /api/actions. |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `options` | object | no |  | The action's options; any left out take their default. |
+
+**Reply 201**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `action` | string | yes |  |  |
+| `created_at` | string (date-time) | yes |  |  |
+| `file_id` | string | yes |  |  |
+| `file_name` | string | yes |  |  |
+| `finished_at` | string (date-time) or null | yes |  |  |
+| `id` | string | yes |  |  |
+| `message` | string | yes |  | Why it failed, as a code. |
+| `options` | object | yes |  |  |
+| `output_bytes` | integer | yes |  |  |
+| `outputs` | integer | yes |  | How many of the files it made are still here. |
+| `progress` | number | yes |  | 0 to 1. |
+| `result` | object | yes |  | What it reported when done, such as how many sections. |
+| `started_at` | string (date-time) or null | yes |  |  |
+| `state` | string | yes | one of `queued`, `running`, `done`, `failed`, `cancelled` |  |
+| `step` | string | yes |  | What it is doing now: the file it is writing. |
+
+### GET /api/runs
+
+List your runs
+
+Newest first unless sorted: each run, how far it has got, and how many files it made.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `limit` | query | integer | no | 1 to 1000; default `200` | Rows to return. Default 200. |
+| `offset` | query | integer | no | at least 0 | Rows to skip: the next value of the previous page. |
+| `q` | query | string | no |  | Keep runs whose file name contains this, in any case. |
+| `sort` | query | string | no | one of `file_name`, `state`, `created_at` | Field to sort the whole list by. |
+| `dir` | query | string | no | one of `asc`, `desc` | Default asc. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `next` | integer or null | yes |  | Offset of the next page, or null on the last one. |
+| `runs` | array of object | yes |  |  |
+| `runs[].action` | string | yes |  |  |
+| `runs[].created_at` | string (date-time) | yes |  |  |
+| `runs[].file_id` | string | yes |  |  |
+| `runs[].file_name` | string | yes |  |  |
+| `runs[].finished_at` | string (date-time) or null | yes |  |  |
+| `runs[].id` | string | yes |  |  |
+| `runs[].message` | string | yes |  | Why it failed, as a code. |
+| `runs[].options` | object | yes |  |  |
+| `runs[].output_bytes` | integer | yes |  |  |
+| `runs[].outputs` | integer | yes |  | How many of the files it made are still here. |
+| `runs[].progress` | number | yes |  | 0 to 1. |
+| `runs[].result` | object | yes |  | What it reported when done, such as how many sections. |
+| `runs[].started_at` | string (date-time) or null | yes |  |  |
+| `runs[].state` | string | yes | one of `queued`, `running`, `done`, `failed`, `cancelled` |  |
+| `runs[].step` | string | yes |  | What it is doing now: the file it is writing. |
+| `total` | integer | yes |  |  |
+
+### GET /api/runs/stream
+
+Hear when your runs or files change
+
+Server-sent events: "runs" when a run moves, "files" when an import has been read. Each only says something changed; fetch the list again.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 401, 403, 404, 429, 503 |
+
+**Reply 200**: Success
+
+Text, as `text/event-stream`.
+
+### GET /api/runs/{run_id}
+
+One of your runs
+
+The run and the files it made, in order.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `run_id` | path | string | yes |  | The run's id, from GET /api/runs. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `action` | string | yes |  |  |
+| `created_at` | string (date-time) | yes |  |  |
+| `file_id` | string | yes |  |  |
+| `file_name` | string | yes |  |  |
+| `files` | array of [`File`](#file) | yes |  |  |
+| `finished_at` | string (date-time) or null | yes |  |  |
+| `id` | string | yes |  |  |
+| `message` | string | yes |  | Why it failed, as a code. |
+| `options` | object | yes |  |  |
+| `output_bytes` | integer | yes |  |  |
+| `outputs` | integer | yes |  | How many of the files it made are still here. |
+| `progress` | number | yes |  | 0 to 1. |
+| `result` | object | yes |  | What it reported when done, such as how many sections. |
+| `started_at` | string (date-time) or null | yes |  |  |
+| `state` | string | yes | one of `queued`, `running`, `done`, `failed`, `cancelled` |  |
+| `step` | string | yes |  | What it is doing now: the file it is writing. |
+
+### POST /api/runs/{run_id}/cancel
+
+Cancel a run
+
+A queued run is cancelled at once, a running one at its next step; what it made so far goes to the bin.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 403, 404, 409, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `run_id` | path | string | yes |  | The run's id, from GET /api/runs. |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `ok` | boolean | yes |  |  |
+
+### POST /api/runs/{run_id}/delete
+
+Delete a run
+
+The run and every file it made go to the bin, and can be restored for ten minutes. A run still going is cancelled first.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `run_id` | path | string | yes |  | The run's id, from GET /api/runs. |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `ok` | boolean | yes |  |  |
+
+### GET /api/runs/{run_id}/download
+
+Download everything a run made
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `run_id` | path | string | yes |  | The run's id, from GET /api/runs. |
+
+**Reply 200**: A zip of the run's files, stored as they are, always as an attachment
+
+Text, as `application/zip`.
+
+### POST /api/runs/{run_id}/restore
+
+Restore a deleted run
+
+Brings back a run you deleted, with its files, while they are still in the bin.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 403, 404, 409, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `run_id` | path | string | yes |  | The run's id, from GET /api/runs. |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `action` | string | yes |  |  |
+| `created_at` | string (date-time) | yes |  |  |
+| `file_id` | string | yes |  |  |
+| `file_name` | string | yes |  |  |
+| `finished_at` | string (date-time) or null | yes |  |  |
+| `id` | string | yes |  |  |
+| `message` | string | yes |  | Why it failed, as a code. |
+| `options` | object | yes |  |  |
+| `output_bytes` | integer | yes |  |  |
+| `outputs` | integer | yes |  | How many of the files it made are still here. |
+| `progress` | number | yes |  | 0 to 1. |
+| `result` | object | yes |  | What it reported when done, such as how many sections. |
+| `started_at` | string (date-time) or null | yes |  |  |
+| `state` | string | yes | one of `queued`, `running`, `done`, `failed`, `cancelled` |  |
+| `step` | string | yes |  | What it is doing now: the file it is writing. |
+
+## Retention
+
+| Method | Path | Summary | Who may call |
+|---|---|---|---|
+| GET | [`/api/account/retention`](#get-apiaccountretention) | How long your files are kept | browser session or API key, anyone signed in |
+| POST | [`/api/account/retention`](#post-apiaccountretention) | Choose how long your files are kept | browser session or API key, anyone signed in |
+| GET | [`/api/admin/retention`](#get-apiadminretention) | The retention policy | browser session or API key, admins |
+| POST | [`/api/admin/retention`](#post-apiadminretention) | Set the retention policy | browser session or API key, admins |
+
+### GET /api/account/retention
+
+How long your files are kept
+
+Your own choice, what applies after the limit, and the policy everyone gets.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 401, 404, 429, 503 |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `effective_import_days` | integer | yes |  | What applies to your imports; 0 is until deleted. |
+| `effective_output_days` | integer | yes |  | What applies to what actions make for you. |
+| `import_days` | integer or null | yes |  | Your choice for imports; null follows the default. |
+| `output_days` | integer or null | yes |  | Your choice for what actions make; null follows the default. |
+| `policy` | object | yes |  |  |
+| `policy.import_days` | integer | yes |  | How long imports are kept unless an account says otherwise. |
+| `policy.max_days` | integer | yes |  | The longest anyone may keep anything; 0 is no limit. |
+| `policy.output_days` | integer | yes |  | How long what actions make is kept unless an account says otherwise. |
+| `policy.updated_at` | string (date-time) or null | yes |  |  |
+
+### POST /api/account/retention
+
+Choose how long your files are kept
+
+Each is clamped to the limit an admin set. Every one of your files gets its expiry worked out again from its import date.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `import_days` | integer or null | no | 0 to 3650 | null follows the default everyone gets. |
+| `output_days` | integer or null | no | 0 to 3650 | null follows the default everyone gets. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `effective_import_days` | integer | yes |  | What applies to your imports; 0 is until deleted. |
+| `effective_output_days` | integer | yes |  | What applies to what actions make for you. |
+| `import_days` | integer or null | yes |  | Your choice for imports; null follows the default. |
+| `output_days` | integer or null | yes |  | Your choice for what actions make; null follows the default. |
+| `policy` | object | yes |  |  |
+| `policy.import_days` | integer | yes |  | How long imports are kept unless an account says otherwise. |
+| `policy.max_days` | integer | yes |  | The longest anyone may keep anything; 0 is no limit. |
+| `policy.output_days` | integer | yes |  | How long what actions make is kept unless an account says otherwise. |
+| `policy.updated_at` | string (date-time) or null | yes |  |  |
+
+### GET /api/admin/retention
+
+The retention policy
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, admins |
+| Errors | 401, 403, 404, 429, 503 |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `import_days` | integer | yes |  | How long imports are kept unless an account says otherwise. |
+| `max_days` | integer | yes |  | The longest anyone may keep anything; 0 is no limit. |
+| `output_days` | integer | yes |  | How long what actions make is kept unless an account says otherwise. |
+| `updated_at` | string (date-time) or null | yes |  |  |
+
+### POST /api/admin/retention
+
+Set the retention policy
+
+A default over the limit is kept as typed and applied up to the limit. Every file's expiry is worked out again, so lowering the limit shortens everyone's at once; files already past it go to the bin on the next retention run.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, admins |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `import_days` | integer | yes | 0 to 3650 | 0 keeps until deleted (or up to the limit, when there is one). |
+| `max_days` | integer | yes | 0 to 3650 | 0 is no limit. |
+| `output_days` | integer | yes | 0 to 3650 | 0 keeps until deleted (or up to the limit, when there is one). |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `import_days` | integer | yes |  | How long imports are kept unless an account says otherwise. |
+| `max_days` | integer | yes |  | The longest anyone may keep anything; 0 is no limit. |
+| `output_days` | integer | yes |  | How long what actions make is kept unless an account says otherwise. |
+| `updated_at` | string (date-time) or null | yes |  |  |
+
 ## Schemas
 
 The shapes the routes above refer to by name.
@@ -2091,13 +2589,24 @@ The shapes the routes above refer to by name.
 
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
+| `bookmarks` | integer | yes |  | Bookmarks in all. |
 | `chunks` | integer | yes |  |  |
 | `created_at` | string (date-time) | yes |  |  |
+| `encrypted` | boolean | yes |  |  |
+| `expires_at` | string (date-time) or null | yes |  | When retention removes it; null keeps it. |
+| `folder` | string | yes |  | The folder it was dropped in with, relative to what was dropped. |
 | `id` | string | yes |  |  |
+| `kind` | string | yes | one of `import`, `output` |  |
+| `levels` | array of integer | yes |  | How many bookmarks sit at each level, from the top. |
 | `name` | string | yes |  |  |
+| `pages` | integer | yes |  |  |
+| `pdf_error` | string | yes |  | Why it could not be read: not_pdf, password or damaged. |
+| `pdf_state` | string | yes | one of `pending`, `ok`, `invalid` | pending until the first look has run. |
 | `received` | integer | yes |  |  |
+| `run_id` | string | yes |  | For an output, the run that made it. |
 | `size` | integer | yes |  |  |
 | `state` | string | yes | one of `uploading`, `ready` |  |
+| `title` | string | yes |  |  |
 | `type` | string | yes |  |  |
 
 ### IPNames

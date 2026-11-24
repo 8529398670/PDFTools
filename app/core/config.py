@@ -61,11 +61,16 @@ FILES_DIR_NAME = "files"
 # Beside storage, not in it: a half-sent file is not worth a backup, and is
 # still changing while one runs.
 UPLOADS_DIR_NAME = "uploads"
-# The size of every piece of an upload but the last. It sits under
-# server.body_limit_bytes on purpose: a file of any size arrives as ordinary
-# small requests, so nothing has to raise a limit that also protects the public
-# routes. See app/models/files.py.
-FILE_CHUNK_BYTES = 768 * 1024
+# The size of every piece of an upload but the last. A file of any size arrives
+# as requests of at most this much, which a proxy such as Cloudflare (100 MB)
+# lets through; the chunk route alone may take a body this long
+# (middleware.BodyLimit), so server.body_limit_bytes still guards the rest.
+# Pieces may be sent several at once. See app/models/files.py.
+FILE_CHUNK_BYTES = 8 * 1024 * 1024
+# Scratch space for the actions (app/actions): a decrypted copy of an encrypted
+# PDF while it is split, and each output before it moves into files/. Beside
+# storage, so a rename into files/ stays on one filesystem, and not in backups.
+WORK_DIR_NAME = "work"
 LOGS_DIR_NAME = "logs"
 BACKUPS_DIR_NAME = "backups"
 # Held by the running server. See app/core/server_lock.py.
@@ -195,6 +200,8 @@ class FilesSection:
     max_file_bytes: int
     quota_bytes_per_user: int
     abandoned_upload_hours: int
+    encrypt: bool
+    workers: int
 
 
 @dataclass
@@ -252,8 +259,14 @@ class FilesConfig:
     max_file_bytes: int = 104857600
     quota_bytes_per_user: int = 1073741824
     abandoned_upload_hours: int = 24
+    # New files are sealed with their own key (app/models/files.py). Off, they
+    # are stored as they arrived, which is what lets a PDF be read in place.
+    encrypt: bool = False
+    # How many actions (a split, ...) run at once. See app/core/runner.py.
+    workers: int = 2
     dir: Path = Path("storage") / "files"
     uploads_dir: Path = Path("uploads")
+    work_dir: Path = Path("work")
 
 
 @dataclass(frozen=True)
@@ -342,7 +355,7 @@ class Config:
     rate_limit_window_seconds: int = 60
     # The separate budget for signing in and joining.
     rate_limit_signin_max: int = 60
-    rate_limit_upload_max: int = 1200
+    rate_limit_upload_max: int = 6000
     body_limit_bytes: int = 1048576
 
     # proxy_header is believed only when trust_proxy is on *and* the
@@ -800,10 +813,7 @@ def validate(file: File) -> list[str]:
     check(file.files.max_file_bytes > 0, "files.max_file_bytes must be positive")
     check(file.files.quota_bytes_per_user > 0, "files.quota_bytes_per_user must be positive")
     check(file.files.abandoned_upload_hours > 0, "files.abandoned_upload_hours must be positive")
-    check(
-        not file.files.enabled or server.body_limit_bytes >= FILE_CHUNK_BYTES,
-        f"server.body_limit_bytes must be at least {FILE_CHUNK_BYTES} while files.enabled is on: that is the size of one piece of an upload",
-    )
+    check(1 <= file.files.workers <= 32, "files.workers must be 1-32")
 
 
     docker = file.docker
@@ -1060,8 +1070,11 @@ def build_config(file: File, path: Path, paths: "Paths", secret_key: str) -> Con
             max_file_bytes=file.files.max_file_bytes,
             quota_bytes_per_user=file.files.quota_bytes_per_user,
             abandoned_upload_hours=file.files.abandoned_upload_hours,
+            encrypt=file.files.encrypt,
+            workers=file.files.workers,
             dir=paths.app_dir / STORAGE_DIR_NAME / FILES_DIR_NAME,
             uploads_dir=paths.app_dir / UPLOADS_DIR_NAME,
+            work_dir=paths.app_dir / WORK_DIR_NAME,
         ),
         backups=BackupsConfig(
             dir=paths.app_dir / BACKUPS_DIR_NAME,

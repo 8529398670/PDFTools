@@ -187,7 +187,9 @@ const App = {
     // Side by side: the wait is the slowest screen, not all of them added up.
     const loading = [];
     loading.push( Sessions.init() );
-    loading.push( Files.init( me ) );
+    loading.push( Library.init( me ) );
+    loading.push( Runs.init( me ) );
+    loading.push( Retention.init( me ) );
     About.init( me );
 
     // A viewer looks and changes nothing: the server refuses every write with

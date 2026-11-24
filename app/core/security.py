@@ -418,6 +418,13 @@ def still_owner(store: Store, credential: str) -> bool:
     return user.role == ROLE_ADMIN and get_owner_id(store) == user.id
 
 
+def still_signed_in(store: Store, credential: str, user_id: int) -> bool:
+    """Whether a session still belongs to user_id, for an open stream that a
+    guard let in once. Like still_owner, it does not touch last_seen_at."""
+    loaded = load_session(store, credential)
+    return loaded is not None and loaded[1].id == user_id and not loaded[1].disabled
+
+
 def log_actor(actor: Actor | None) -> dict:
     """Who an activity-log entry belongs to: the account, the role it acted
     with, and which door it came through (a key by its public id only)."""

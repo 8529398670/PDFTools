@@ -10,7 +10,7 @@ from typing import Callable
 from app.core import config_live, db, logs
 from app.core.jobs import Registry
 from app.models import credentials, login_tokens, sessions
-from app.models import files
+from app.models import files, retention, runs
 from app.models import sign_in
 
 HOUR_SECONDS = 60 * 60
@@ -70,8 +70,18 @@ def sweep_files(store: db.Store, settings: config_live.Holder) -> tuple[str, str
     return f"removed {removed} files, {strays} strays", ""
 
 
+def apply_retention(store: db.Store) -> tuple[str, str]:
+    """Move files past their expiry to the bin (retention.expire_due), and
+    drop run records with nothing left to show. The files job removes the
+    bytes once the undo window has passed."""
+    expired = retention.expire_due(store)
+    swept = runs.sweep_runs(store)
+    return f"expired {expired} files, removed {swept} runs", ""
+
+
 def register(registry: Registry, store: db.Store, settings: config_live.Holder, logger: logs.Logger) -> None:
     registry.register("purge", HOUR_SECONDS, lambda: purge(store))
     if logger.enabled:
         registry.register("prune-logs", HOUR_SECONDS, lambda: prune_logs(logger))
+    registry.register("retention", HOUR_SECONDS, lambda: apply_retention(store))
     registry.register("files", HOUR_SECONDS, lambda: sweep_files(store, settings))

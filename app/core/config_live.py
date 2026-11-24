@@ -163,6 +163,7 @@ def live_config(boot: Config, boot_file: config.File, file: config.File) -> Conf
             max_file_bytes=file.files.max_file_bytes,
             quota_bytes_per_user=file.files.quota_bytes_per_user,
             abandoned_upload_hours=file.files.abandoned_upload_hours,
+            encrypt=file.files.encrypt,
         ),
         file=file,
     )

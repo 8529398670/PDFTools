@@ -7,8 +7,9 @@ they only add headers or answer early, which needs no request body handling,
 and plain ASGI avoids BaseHTTPMiddleware's known problems with streaming
 responses and context variables.
 
-The request body limit is Starlette's own RequestBodyLimitMiddleware (wired in
-app/main.py), so it is not repeated here.
+The request body limit is Starlette's own RequestBodyLimitMiddleware, picked per
+path by BodyLimit below: an upload's pieces get their own, larger limit, and
+every other route keeps server.body_limit_bytes.
 """
 from __future__ import annotations
 
@@ -24,6 +25,10 @@ from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+import re
+
+from starlette.middleware.body_limit import RequestBodyLimitMiddleware
 
 from app.core import error_page, logs, request_id
 from app.core.config import Config, trusted_proxy_networks
@@ -232,11 +237,14 @@ BUDGET_NONE = "none"
 
 
 def upload_chunk(method: str, normalised: str) -> bool:
-    """Exactly POST /api/files/<id>/chunks/<index>. A file arrives as many of
-    these, so they have a budget of their own: on the general one a big upload
-    would use up what the page needs and still crawl."""
+    """The upload protocol: POST /api/files, POST /api/files/<id>/chunks/<index>
+    and POST /api/files/<id>/finish. A big file arrives as many pieces, and a
+    dropped folder as many files, so they have a budget of their own: on the
+    general one an import would use up what the page needs and still crawl."""
     parts = normalised.split("/")
-    return method == "POST" and len(parts) == 6 and parts[1:3] == ["api", "files"] and parts[4] == "chunks"
+    if method != "POST" or parts[1:3] != ["api", "files"]:
+        return False
+    return len(parts) == 3 or (len(parts) == 5 and parts[4] == "finish") or (len(parts) == 6 and parts[4] == "chunks")
 
 
 def normalise_path(path: str) -> str:
@@ -470,3 +478,23 @@ async def server_error(request: Request, exc: Exception) -> Response:
 
 
 EXCEPTION_HANDLERS = {HTTPException: http_error, 500: server_error}
+
+
+# The one route whose body is a piece of a file. See app/routes/files.py.
+CHUNK_PATH = re.compile(r"^/api/files/[^/]+/chunks/\d+$")
+
+
+class BodyLimit:
+    """server.body_limit_bytes for every request but a piece of an upload,
+    which may be as long as one piece (config.FILE_CHUNK_BYTES). Raising the
+    global limit instead would let every JSON route take 8 MiB bodies."""
+
+    def __init__(self, app: ASGIApp, max_body_size: int, chunk_body_size: int) -> None:
+        self.small = RequestBodyLimitMiddleware(app, max_body_size=max_body_size)
+        self.large = RequestBodyLimitMiddleware(app, max_body_size=max(max_body_size, chunk_body_size))
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope.get("method") == "POST" and CHUNK_PATH.match(scope.get("path", "")):
+            await self.large(scope, receive, send)
+        else:
+            await self.small(scope, receive, send)

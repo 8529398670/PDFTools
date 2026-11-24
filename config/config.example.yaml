@@ -151,10 +151,11 @@ server:
   # handing an invite link to a large group in one room. [live]
   rate_limit_signin_max: 60
 
-  # One piece of an upload counts against this budget instead, out of the same
-  # window. A piece is 768 KiB, so 1200 is about 900 MB a minute per address.
+  # Importing (starting a file, each piece of it, finishing it) counts against
+  # this budget instead, out of the same window. A piece is 8 MiB, so 6000 is about 48 GB a minute per address:
+  # enough that a fast link is never held back mid-book.
   # [live]
-  rate_limit_upload_max: 1200
+  rate_limit_upload_max: 6000
 
 
   # Maintenance mode. none is normal running. read_only keeps the app readable
@@ -227,19 +228,26 @@ logs:
 
 
 
-# The Files screen and /api/files. Files are always encrypted on disk, whatever
-# encrypt_at_rest says.
+# The Library screen and /api/files: imported PDFs and what actions make of them.
 files:
   # false hides the screen and makes every /api/files route answer 404. Files
   # already uploaded stay on disk.
   enabled: true                    # [live]
-  # The largest single file, in bytes. 104857600 is 100 MiB.
-  max_file_bytes: 104857600        # [live]
-  # How much one account may keep, in bytes, counting uploads still arriving.
-  # 1073741824 is 1 GiB.
-  quota_bytes_per_user: 1073741824 # [live]
+  # The largest single file, in bytes. 10737418240 is 10 GiB.
+  max_file_bytes: 10737418240      # [live]
+  # How much one account may keep, in bytes, counting uploads still arriving
+  # and the sections actions make. 53687091200 is 50 GiB.
+  quota_bytes_per_user: 53687091200 # [live]
   # An upload that has had nothing new for this long is removed.
   abandoned_upload_hours: 24       # [live]
+  # Seal each new file with its own key, so the bytes on disk are unreadable
+  # without secret.key. Off (the default), PDFs are stored as they arrived:
+  # actions read them in place and downloads go straight from disk, which is
+  # much faster for books of several GB. Turning it on or off changes new
+  # files only; each file remembers how it was stored.
+  encrypt: false                   # [live]
+  # How many actions (a split, ...) run at the same time.
+  workers: 2                       # [restart]
 
 # [scripts] Read by docker/run.sh, which applies a change the next time it
 # runs. Edit these on the host: inside the container they are read-only.

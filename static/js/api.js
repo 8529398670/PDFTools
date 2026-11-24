@@ -161,7 +161,8 @@ const Api = {
   allFiles( offset , params )  { return this.request( "/api/admin/files" + this.query( { offset: offset , ...params } ) ); },
   storage()                    { return this.request( "/api/account/storage" ); },
   allStorage()                 { return this.request( "/api/admin/storage" ); },
-  createFile( name , size , type ) { return this.post( "/api/files" , { name: name , size: size , type: type } ); },
+  createFile( name , size , type , folder ) { return this.post( "/api/files" , { name: name , size: size , type: type , folder: folder || "" } ); },
+  file( id )                   { return this.request( "/api/files/" + encodeURIComponent( id ) ); },
   sendFileChunk( id , index , piece ) {
     return this.request( "/api/files/" + encodeURIComponent( id ) + "/chunks/" + index , {
       method: "POST",
@@ -182,6 +183,26 @@ const Api = {
   restoreAnyFile( id )         { return this.post( "/api/admin/files/" + encodeURIComponent( id ) + "/restore" ); },
   fileDownloadPath( id )       { return "/api/files/" + encodeURIComponent( id ) + "/download"; },
   anyFileDownloadPath( id )    { return "/api/admin/files/" + encodeURIComponent( id ) + "/download"; },
+
+  // Actions and their runs (runs.js), and retention (retention.js).
+  actions()                    { return this.request( "/api/actions" ); },
+  startAction( fileId , action , options ) {
+    return this.post( "/api/files/" + encodeURIComponent( fileId ) + "/actions/" + encodeURIComponent( action ) , { options: options } );
+  },
+  startActionMany( fileIds , action , options ) {
+    return this.post( "/api/actions/" + encodeURIComponent( action ) + "/start" , { file_ids: fileIds , options: options } );
+  },
+  runs( offset , params )      { return this.request( "/api/runs" + this.query( { offset: offset , ...params } ) ); },
+  run( id )                    { return this.request( "/api/runs/" + encodeURIComponent( id ) ); },
+  cancelRun( id )              { return this.post( "/api/runs/" + encodeURIComponent( id ) + "/cancel" ); },
+  deleteRun( id )              { return this.post( "/api/runs/" + encodeURIComponent( id ) + "/delete" ); },
+  restoreRun( id )             { return this.post( "/api/runs/" + encodeURIComponent( id ) + "/restore" ); },
+  runDownloadPath( id )        { return "/api/runs/" + encodeURIComponent( id ) + "/download"; },
+  workStreamPath()             { return "/api/runs/stream"; },
+  myRetention()                { return this.request( "/api/account/retention" ); },
+  setMyRetention( values )     { return this.post( "/api/account/retention" , values ); },
+  retentionPolicy()            { return this.request( "/api/admin/retention" ); },
+  setRetentionPolicy( values ) { return this.post( "/api/admin/retention" , values ); },
 
   // Background jobs (owner only). A run outlives the call that starts it.
   jobs()                       { return this.request( "/api/owner/jobs" ); },

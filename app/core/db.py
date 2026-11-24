@@ -53,6 +53,10 @@ BUCKET_FILES = "files"
 # What the owner calls an address. See app/models/ip_names.py.
 BUCKET_IP_NAMES = "ip_names"
 BUCKET_META = "meta"
+# The global retention policy and each account's own. See app/models/retention.py.
+BUCKET_RETENTION = "retention"
+# One action run on one file: a split, ... See app/models/runs.py.
+BUCKET_RUNS = "runs"
 
 BUCKETS = (
     BUCKET_USERS,
@@ -67,6 +71,8 @@ BUCKETS = (
     BUCKET_FILES,
     BUCKET_IP_NAMES,
     BUCKET_META,
+    BUCKET_RETENTION,
+    BUCKET_RUNS,
 )
 
 # How long a writer waits for another writer before giving up. Without it a

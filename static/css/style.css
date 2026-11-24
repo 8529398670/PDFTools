@@ -781,3 +781,15 @@ body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-ins
     scroll-behavior: auto !important;
   }
 }
+
+/* The Library's drop zone: Bootstrap has borders but no dashed one. It lights
+   up while something is dragged over the screen (.file-drop-active). */
+.drop-zone { border-style: dashed !important; transition: background-color 0.15s; }
+.drop-zone.file-drop-active { background-color: var(--bs-primary-bg-subtle); outline: none; }
+/* The import list scrolls in its own box, so a folder of hundreds of PDFs does
+   not push the table off the screen. */
+#import-list { max-height: 18rem; overflow-y: auto; }
+/* The tick-box column takes no more room than its box. */
+.table-check { width: 2.5rem; }
+/* A file name is what people read a row by: it never wraps a letter at a time. */
+.cell-name { min-width: 12rem; }

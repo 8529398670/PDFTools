@@ -1,31 +1,34 @@
-"""Uploaded files. The record here describes one; the bytes are on disk. Go's
-twin is server/models/file.go.
+"""Uploaded files and the files actions make from them. The record here
+describes one; the bytes are on disk.
 
-A file arrives in pieces of CHUNK_BYTES, each an ordinary request under the
-global body limit, so nothing here raises that limit and both templates speak
-the same protocol. It also means a file is encrypted as it arrives and never
-sits in a temp directory in the clear.
+A file arrives in pieces of CHUNK_BYTES, each its own request, so no proxy has
+to take a body of gigabytes and a failed piece is all that is sent again. The
+pieces may come in any order and several at once: the upload is created at its
+final size, every piece is written at an offset that can be computed from its
+index, and the record keeps a bitmap of which have arrived.
 
-Each file has its own random key, and only that key is sealed with the secret
-key. Moving to a new secret key therefore rewrites one field of the record (see
-sealed.SEALED_FIELDS) rather than every file on disk, and needs nothing from
-rotate-key or a restore beyond what they already do for a sealed field.
+How a file is stored is decided when it is created, by files.encrypt, and kept
+on the record, so switching the setting never strands a file:
 
-Each piece is sealed on its own, bound to the file's id, its index and the
-number of pieces, so it opens only where it belongs. All pieces but the last are
-the same size, which puts every piece at an offset that can be computed and
-leaves the disk format with nothing else in it.
+- plain (the default): the bytes exactly as sent. An action opens the file in
+  place and a download is a plain file response, with ranges.
+- encrypted: each file has its own random key, sealed with the secret key
+  (sealed.SEALED_FIELDS, so a rotation rewrites one field, never the bytes).
+  Each piece is sealed on its own, bound to the file's id, its index and the
+  number of pieces, so it opens only where it belongs.
 """
 from __future__ import annotations
 
+import base64
 import os
+import shutil
 import threading
 import time
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 from app.core import config_secret, encryption
 from app.core.config import FILE_CHUNK_BYTES as CHUNK_BYTES
@@ -37,14 +40,27 @@ from app.models import users
 UPLOADING = "uploading"
 READY = "ready"
 
+# What a file is to this app. An import is something someone dropped in; an
+# output is a file an action made, which belongs to a run (app/models/runs.py).
+KIND_IMPORT = "import"
+KIND_OUTPUT = "output"
+
+# What reading a PDF found (pdf_state). Pending until the inspect step has run.
+PDF_PENDING = "pending"
+PDF_OK = "ok"
+PDF_INVALID = "invalid"
+
 # What sealing adds to a piece: nonce and tag.
 CHUNK_OVERHEAD = 24 + 16
 NAME_MAX = 255
+FOLDER_MAX = 1024
 TYPE_MAX = 127
 # How old a file with no record must be before it is removed. Finishing a file
 # renames it before the record says so, and a restore can leave either one
 # without the other.
 STRAY_AGE_SECONDS = 24 * 60 * 60
+# How much a plain read takes at a time.
+READ_BYTES = 1024 * 1024
 
 
 class BadFileError(Exception):
@@ -92,14 +108,30 @@ class File:
     chunks: int
     received: int
     state: str
-    # This file's own key, sealed with the secret key. It is in SEALED_FIELDS,
-    # so it follows a rotation.
+    # This file's own key, sealed with the secret key; "" for a plain file. It
+    # is in SEALED_FIELDS, so it follows a rotation.
     key: str
     created_at: datetime
     # When the last piece arrived.
     updated_at: datetime
     deleted_at: datetime | None = None
     deleted_by: int | None = None
+    encrypted: bool = True
+    # Which pieces have arrived, one bit each, base64. Empty once ready.
+    have: str = ""
+    # The folder it was dropped in with, relative to what was dropped. Shown
+    # only: paths on disk use the id.
+    folder: str = ""
+    kind: str = KIND_IMPORT
+    # For an output: the run that made it and the file it was made from.
+    run_id: str = ""
+    source_id: str = ""
+    # What reading it as a PDF found: pdf_state, and the details.
+    pdf_state: str = PDF_PENDING
+    pdf_error: str = ""
+    pdf: dict[str, Any] = field(default_factory=dict)
+    # When retention removes it; None keeps it. See app/models/retention.py.
+    expires_at: datetime | None = None
 
     @property
     def deleted(self) -> bool:
@@ -110,13 +142,23 @@ class File:
         return self.size - index * CHUNK_BYTES if index == self.chunks - 1 else CHUNK_BYTES
 
     @property
-    def sealed_size(self) -> int:
-        return self.size + self.chunks * CHUNK_OVERHEAD
+    def stored_size(self) -> int:
+        """How long the file is on disk."""
+        return self.size + self.chunks * CHUNK_OVERHEAD if self.encrypted else self.size
+
+    def stored_offset(self, index: int) -> int:
+        """Where piece index starts on disk."""
+        return index * (CHUNK_BYTES + CHUNK_OVERHEAD) if self.encrypted else index * CHUNK_BYTES
 
     def bound(self, index: int) -> bytes:
         """What a piece is sealed to. Without the count, a file cut off after
         a whole piece would still open."""
         return f"{self.id}|{index}|{self.chunks}".encode()
+
+    def missing(self) -> list[int]:
+        """The pieces still to send."""
+        bits = _bits(self.have, self.chunks)
+        return [index for index in range(self.chunks) if not bits[index >> 3] & (1 << (index & 7))]
 
     def to_record(self) -> Record:
         return {
@@ -133,6 +175,16 @@ class File:
             "updated_at": to_iso(self.updated_at),
             "deleted_at": to_iso(self.deleted_at),
             "deleted_by": self.deleted_by,
+            "encrypted": self.encrypted,
+            "have": self.have,
+            "folder": self.folder,
+            "kind": self.kind,
+            "run_id": self.run_id,
+            "source_id": self.source_id,
+            "pdf_state": self.pdf_state,
+            "pdf_error": self.pdf_error,
+            "pdf": self.pdf,
+            "expires_at": to_iso(self.expires_at),
         }
 
     @classmethod
@@ -151,16 +203,27 @@ class File:
             updated_at=from_iso(record["updated_at"]),
             deleted_at=from_iso(record.get("deleted_at")),
             deleted_by=record.get("deleted_by"),
+            encrypted=record.get("encrypted", True),
+            have=record.get("have", ""),
+            folder=record.get("folder", ""),
+            kind=record.get("kind", KIND_IMPORT),
+            run_id=record.get("run_id", ""),
+            source_id=record.get("source_id", ""),
+            pdf_state=record.get("pdf_state", PDF_PENDING),
+            pdf_error=record.get("pdf_error", ""),
+            pdf=record.get("pdf") or {},
+            expires_at=from_iso(record.get("expires_at")),
         )
+
+
+def _bits(have: str, chunks: int) -> bytearray:
+    raw = bytearray(base64.b64decode(have)) if have else bytearray()
+    size = (chunks + 7) // 8
+    return raw + bytearray(size - len(raw)) if len(raw) < size else raw
 
 
 def chunk_count(size: int) -> int:
     return (size + CHUNK_BYTES - 1) // CHUNK_BYTES
-
-
-def sealed_offset(index: int) -> int:
-    """Where piece index starts on disk."""
-    return index * (CHUNK_BYTES + CHUNK_OVERHEAD)
 
 
 def upload_path(cfg: Config, file_id: str) -> Path:
@@ -171,12 +234,34 @@ def finished_path(cfg: Config, file_id: str) -> Path:
     return cfg.files.dir / file_id
 
 
+def work_dir(cfg: Config) -> Path:
+    """Scratch space for actions, created 0700."""
+    cfg.files.work_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return cfg.files.work_dir
+
+
 def clean_name(name: str) -> str:
     """The last part of whatever path a client sent, without control
     characters. It is only ever shown and offered as a download name: paths on
     disk use the id."""
     name = name.replace("\\", "/").rsplit("/", 1)[-1]
     return "".join(character for character in name if unicodedata.category(character) != "Cc" and character != "�").strip()
+
+
+def clean_folder(folder: str) -> str:
+    """A relative folder path as dropped, each part cleaned like a name, with
+    nothing that climbs out ("..") or starts at the root."""
+    parts = [clean_name(part) for part in folder.replace("\\", "/").split("/")]
+    kept = "/".join(part for part in parts if part and part not in (".", ".."))
+    return kept[:FOLDER_MAX]
+
+
+def _file_key(cfg: Config, file: File) -> bytes | str:
+    return encryption.xchacha_decrypt_string(encryption.subkey(cfg.secret_key, encryption.PURPOSE_FILES), file.key)
+
+
+def _new_key(cfg: Config) -> str:
+    return encryption.xchacha_encrypt_string(encryption.subkey(cfg.secret_key, encryption.PURPOSE_FILES), config_secret.generate_secret())
 
 
 def _used_bytes(transaction: Transaction, user_id: int) -> int:
@@ -197,15 +282,20 @@ def storage_used(store: Store, user_id: int | None = None) -> int:
     )
 
 
-def create_file(store: Store, cfg: Config, user_id: int, name: str, declared_type: str, size: int) -> File:
+def create_file(
+    store: Store, cfg: Config, user_id: int, name: str, declared_type: str, size: int,
+    folder: str = "", expires_at: datetime | None = None,
+) -> File:
     """Start an upload. The quota is checked in the same transaction that adds
-    the record, so two uploads cannot both take the last of it."""
+    the record, so two uploads cannot both take the last of it. The upload is
+    made at its full size now, so pieces can land in any order."""
     name = clean_name(name)
     if not name or len(name.encode()) > NAME_MAX or size < 0 or len(declared_type.encode()) > TYPE_MAX:
         raise BadFileError()
     if size > cfg.files.max_file_bytes:
         raise FileTooLargeError()
     now = utc_now()
+    encrypted = cfg.files.encrypt
     file = File(
         id=encryption.url_token(12),
         user_id=user_id,
@@ -215,14 +305,24 @@ def create_file(store: Store, cfg: Config, user_id: int, name: str, declared_typ
         chunks=chunk_count(size),
         received=0,
         state=UPLOADING,
-        key=encryption.xchacha_encrypt_string(encryption.subkey(cfg.secret_key, encryption.PURPOSE_FILES), config_secret.generate_secret()),
+        key=_new_key(cfg) if encrypted else "",
         created_at=now,
         updated_at=now,
+        encrypted=encrypted,
+        folder=clean_folder(folder),
+        expires_at=expires_at,
     )
     with store.transaction() as transaction:
         if _used_bytes(transaction, user_id) + size > cfg.files.quota_bytes_per_user:
             raise FileQuotaError()
         transaction.put(BUCKET_FILES, file.id, file.to_record())
+    cfg.files.uploads_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor = os.open(upload_path(cfg, file.id), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        # Sparse: no bytes are written until the pieces come.
+        os.ftruncate(descriptor, file.stored_size)
+    finally:
+        os.close(descriptor)
     return file
 
 
@@ -232,38 +332,43 @@ def get_file(store: Store, file_id: str) -> File | None:
     return None if record is None else File.from_record(record)
 
 
-def list_files(store: Store, user_id: int | None = None) -> list[File]:
-    """The finished files, newest first: one account's, or everyone's."""
-    files = [File.from_record(record) for _, record in store.all(BUCKET_FILES)]
-    files = [file for file in files if file.state == READY and not file.deleted and user_id in (None, file.user_id)]
+def all_files(store: Store) -> list[File]:
+    return [File.from_record(record) for _, record in store.all(BUCKET_FILES)]
+
+
+def list_files(store: Store, user_id: int | None = None, kind: str | None = KIND_IMPORT) -> list[File]:
+    """The finished files, newest first: one account's, or everyone's; of
+    one kind, or every kind for None."""
+    files = [
+        file for file in all_files(store)
+        if file.state == READY and not file.deleted and user_id in (None, file.user_id) and kind in (None, file.kind)
+    ]
     files.sort(key=lambda file: file.created_at, reverse=True)
     return files
 
 
-def write_chunk(store: Store, cfg: Config, file: File, index: int, plain: bytes) -> None:
-    """Seal one piece and put it at its place in the upload. It goes to a
-    computed offset, and whatever follows is cut off, so a retry after a crash
-    between the write and the record's update simply writes it again. The
-    caller holds the UploadLocks entry and has checked index is the next one."""
+def write_chunk(store: Store, cfg: Config, file: File, index: int, plain: bytes) -> int:
+    """Put one piece at its place in the upload, sealing it first for an
+    encrypted file, and answer how many pieces have now arrived. Writing a
+    piece that is already there writes the same bytes again, so a retry after
+    a lost reply is harmless. The caller holds the UploadLocks entry for this
+    piece."""
     if len(plain) != file.chunk_length(index):
         raise ChunkSizeError()
-    file_key = encryption.xchacha_decrypt_string(encryption.subkey(cfg.secret_key, encryption.PURPOSE_FILES), file.key)
-    sealed = encryption.xchacha_encrypt_bound(file_key, plain, file.bound(index))
-
-    cfg.files.uploads_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    flags = os.O_WRONLY | (os.O_CREAT if index == 0 else 0)
+    data = encryption.xchacha_encrypt_bound(_file_key(cfg, file), plain, file.bound(index)) if file.encrypted else plain
     try:
-        descriptor = os.open(upload_path(cfg, file.id), flags, 0o600)
+        descriptor = os.open(upload_path(cfg, file.id), os.O_WRONLY)
     except FileNotFoundError:
         raise FileMissingError() from None
     try:
-        offset = sealed_offset(index)
-        # Short of where this piece goes means the pieces before it are gone,
-        # as after a restore. Writing anyway would leave a hole.
-        if os.fstat(descriptor).st_size < offset:
+        if os.fstat(descriptor).st_size != file.stored_size:
             raise FileMissingError()
-        os.pwrite(descriptor, sealed, offset)
-        os.ftruncate(descriptor, offset + len(sealed))
+        view = memoryview(data)
+        offset = file.stored_offset(index)
+        while view:
+            written = os.pwrite(descriptor, view, offset)
+            view = view[written:]
+            offset += written
         # Before the record, which is durable as soon as it is written, says
         # the piece is here.
         os.fsync(descriptor)
@@ -271,39 +376,142 @@ def write_chunk(store: Store, cfg: Config, file: File, index: int, plain: bytes)
         os.close(descriptor)
 
     def mutate(record: Record) -> None:
-        record["received"] = index + 1
+        bits = _bits(record.get("have", ""), record["chunks"])
+        bits[index >> 3] |= 1 << (index & 7)
+        record["have"] = base64.b64encode(bytes(bits)).decode()
+        record["received"] = sum(bin(byte).count("1") for byte in bits)
         record["updated_at"] = to_iso(utc_now())
 
-    store.update_value(BUCKET_FILES, file.id, mutate)
+    record = store.update_value(BUCKET_FILES, file.id, mutate)
+    if record is None:
+        raise FileMissingError()
+    return int(record["received"])
 
 
 def finish_file(store: Store, cfg: Config, file: File) -> File:
     """Move a complete upload into place and mark it ready. Asked again after a
     crash between the two, it finds the file already moved and goes on."""
-    # Both, here rather than at startup: an empty file has written no piece,
-    # and a restore replaces storage/ with whatever the backup held.
-    for directory in (cfg.files.dir, cfg.files.uploads_dir):
-        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    cfg.files.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     source = upload_path(cfg, file.id)
     target = finished_path(cfg, file.id)
-    if file.chunks == 0:
-        source.touch(mode=0o600)
     try:
-        if source.stat().st_size != file.sealed_size:
+        if source.stat().st_size != file.stored_size:
             raise FileMissingError()
         source.rename(target)
     except FileNotFoundError:
-        if not target.exists() or target.stat().st_size != file.sealed_size:
+        if not target.exists() or target.stat().st_size != file.stored_size:
             raise FileMissingError() from None
 
     def mutate(record: Record) -> None:
         record["state"] = READY
+        record["have"] = ""
         record["updated_at"] = to_iso(utc_now())
 
     record = store.update_value(BUCKET_FILES, file.id, mutate)
     if record is None:
         raise FileMissingError()
     return File.from_record(record)
+
+
+def add_output(
+    store: Store, cfg: Config, user_id: int, name: str, source: Path, run_id: str, source_id: str,
+    pdf: dict[str, Any], expires_at: datetime | None,
+) -> File:
+    """Keep a file an action wrote at source (in the work directory) as an
+    output of run_id. A plain one is renamed into place, which costs nothing;
+    an encrypted one is sealed piece by piece into place and source removed.
+    Counts against the quota like an upload."""
+    name = clean_name(name)[:NAME_MAX] or "output.pdf"
+    size = source.stat().st_size
+    now = utc_now()
+    encrypted = cfg.files.encrypt
+    file = File(
+        id=encryption.url_token(12),
+        user_id=user_id,
+        name=name,
+        type="application/pdf",
+        size=size,
+        chunks=chunk_count(size),
+        received=chunk_count(size),
+        state=UPLOADING,
+        key=_new_key(cfg) if encrypted else "",
+        created_at=now,
+        updated_at=now,
+        encrypted=encrypted,
+        kind=KIND_OUTPUT,
+        run_id=run_id,
+        source_id=source_id,
+        pdf_state=PDF_OK,
+        pdf=pdf,
+        expires_at=expires_at,
+    )
+    with store.transaction() as transaction:
+        if _used_bytes(transaction, user_id) + size > cfg.files.quota_bytes_per_user:
+            raise FileQuotaError()
+        transaction.put(BUCKET_FILES, file.id, file.to_record())
+    cfg.files.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    target = finished_path(cfg, file.id)
+    try:
+        if encrypted:
+            seal_into(cfg, file, source, target)
+            source.unlink(missing_ok=True)
+        else:
+            os.chmod(source, 0o600)
+            source.rename(target)
+    except BaseException:
+        store.delete_where(BUCKET_FILES, lambda key, record: key == file.id)
+        target.unlink(missing_ok=True)
+        raise
+
+    def mutate(record: Record) -> None:
+        record["state"] = READY
+
+    store.update_value(BUCKET_FILES, file.id, mutate)
+    file.state = READY
+    return file
+
+
+def seal_into(cfg: Config, file: File, source: Path, target: Path) -> None:
+    """Write source's bytes to target as file's sealed pieces."""
+    key = _file_key(cfg, file)
+    with source.open("rb") as reader, target.open("wb") as writer:
+        os.chmod(target, 0o600)
+        for index in range(file.chunks):
+            plain = reader.read(file.chunk_length(index))
+            writer.write(encryption.xchacha_encrypt_bound(key, plain, file.bound(index)))
+        writer.flush()
+        os.fsync(writer.fileno())
+
+
+def plain_copy(cfg: Config, file: File, target: Path) -> None:
+    """The file's bytes, opened, written to target (0600): how an action gets
+    a readable copy of an encrypted file."""
+    reader = FileReader(cfg, file)
+    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "wb") as writer:
+        for piece in reader:
+            writer.write(piece)
+
+
+def readable_path(cfg: Config, file: File) -> Path:
+    """Where the file's bytes can be read as they are, for a plain file."""
+    return finished_path(cfg, file.id)
+
+
+def set_pdf_info(store: Store, file_id: str, state: str, info: dict[str, Any], error: str = "") -> None:
+    def mutate(record: Record) -> None:
+        record["pdf_state"] = state
+        record["pdf"] = info
+        record["pdf_error"] = error
+
+    store.update_value(BUCKET_FILES, file_id, mutate)
+
+
+def set_expiry(store: Store, file_id: str, expires_at: datetime | None) -> None:
+    def mutate(record: Record) -> None:
+        record["expires_at"] = to_iso(expires_at)
+
+    store.update_value(BUCKET_FILES, file_id, mutate)
 
 
 def rename_file(store: Store, file_id: str, name: str, expect: str | None = None) -> str | None:
@@ -363,23 +571,27 @@ def restore_file(store: Store, cfg: Config, file_id: str, actor_id: int, actor_i
 
 class FileReader:
     """A finished file's plain bytes, a piece at a time, so memory stays flat
-    whatever the size. A piece that does not open raises, and nothing from it is
-    handed out."""
+    whatever the size. A sealed piece that does not open raises, and nothing
+    from it is handed out."""
 
     def __init__(self, cfg: Config, file: File) -> None:
         self.file = file
-        self.key = encryption.xchacha_decrypt_string(encryption.subkey(cfg.secret_key, encryption.PURPOSE_FILES), file.key)
+        self.key = _file_key(cfg, file) if file.encrypted else b""
         try:
             self.source = finished_path(cfg, file.id).open("rb")
         except FileNotFoundError:
             raise FileMissingError() from None
-        if os.fstat(self.source.fileno()).st_size != file.sealed_size:
+        if os.fstat(self.source.fileno()).st_size != file.stored_size:
             self.source.close()
             raise FileMissingError()
 
     def __iter__(self) -> Iterator[bytes]:
         """Closes the file when it ends, however it ends."""
         try:
+            if not self.file.encrypted:
+                while piece := self.source.read(READ_BYTES):
+                    yield piece
+                return
             for index in range(self.file.chunks):
                 sealed = self.source.read(self.file.chunk_length(index) + CHUNK_OVERHEAD)
                 yield encryption.xchacha_decrypt_bound(self.key, sealed, self.file.bound(index))
@@ -395,7 +607,8 @@ def sweep_files(store: Store, cfg: Config) -> tuple[int, int]:
     nobody has touched for files.abandoned_upload_hours and a file whose account
     has gone lose their record and then their bytes, so a crash between the two
     leaves a stray rather than a record pointing at nothing. Strays are the last
-    step. Answers how many of each went."""
+    step, and old leftovers in the work directory with them. Answers how many of
+    each went."""
     accounts = {user.id for user in users.list_users(store)}
     cutoff = utc_now() - timedelta(hours=cfg.files.abandoned_upload_hours)
     doomed: list[str] = []
@@ -416,37 +629,47 @@ def sweep_files(store: Store, cfg: Config) -> tuple[int, int]:
 
 def _remove_strays(store: Store, cfg: Config) -> int:
     """Reads the record ids after the directories, so a file arriving in
-    between has its record seen. Its age would keep it safe anyway."""
+    between has its record seen. Its age would keep it safe anyway. Anything in
+    the work directory that old is a leftover from an action cut off."""
     old = time.time() - STRAY_AGE_SECONDS
+    count = 0
+    if cfg.files.work_dir.is_dir():
+        for path in cfg.files.work_dir.iterdir():
+            if path.stat().st_mtime < old:
+                shutil.rmtree(path, ignore_errors=True) if path.is_dir() else path.unlink(missing_ok=True)
+                count += 1
     candidates: list[Path] = []
     for directory in (cfg.files.uploads_dir, cfg.files.dir):
         if directory.is_dir():
             candidates += [path for path in directory.iterdir() if path.is_file() and not path.is_symlink() and path.stat().st_mtime < old]
     if not candidates:
-        return 0
+        return count
     known = {str(key) for key, _ in store.all(BUCKET_FILES)}
     strays = [path for path in candidates if path.name not in known]
     for path in strays:
         path.unlink(missing_ok=True)
-    return len(strays)
+    return count + len(strays)
 
 
 class UploadLocks:
-    """Keeps two requests from writing one upload at once. It lives in the
-    process, like the rate limiter, because this template is one process."""
+    """Keeps two requests from writing the same piece, or finishing an upload
+    while a piece is being written. It lives in the process, like the rate
+    limiter, because this template is one process."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._held: set[str] = set()
+        self._held: set[tuple[str, int]] = set()
 
-    def hold(self, file_id: str) -> bool:
-        """Claim file_id; False means another request has it."""
+    def hold(self, file_id: str, index: int) -> bool:
+        """Claim one piece; False means another request has it. index -1 is
+        the whole upload, which no piece may be held alongside."""
         with self._lock:
-            if file_id in self._held:
+            taken = {(held_id, held_index) for held_id, held_index in self._held if held_id == file_id}
+            if (file_id, index) in taken or (file_id, -1) in taken or (index == -1 and taken):
                 return False
-            self._held.add(file_id)
+            self._held.add((file_id, index))
             return True
 
-    def release(self, file_id: str) -> None:
+    def release(self, file_id: str, index: int) -> None:
         with self._lock:
-            self._held.discard(file_id)
+            self._held.discard((file_id, index))
