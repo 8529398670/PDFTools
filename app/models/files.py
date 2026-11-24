@@ -16,11 +16,37 @@ on the record, so switching the setting never strands a file:
   (sealed.SEALED_FIELDS, so a rotation rewrites one field, never the bytes).
   Each piece is sealed on its own, bound to the file's id, its index and the
   number of pieces, so it opens only where it belongs.
+
+The bytes themselves are shared. Each distinct content is stored once, as a
+blob (BUCKET_BLOBS, bytes under files.dir/blobs/<fingerprint>), and every file
+record with that content, whoever's it is, points at it with `blob`. A linked
+record carries the blob's own way of storing (encrypted, and its key, sealed
+the same way), and its pieces are bound to the blob's fingerprint instead of
+its own id, so any record with the blob opens it. Names, folders, expiry and
+quota stay per record: an account's quota counts the full size of each of its
+files, shared or not. A blob goes when no record names it any more (the sweep).
+
+How a file comes to share:
+- an upload arrives as its own file and is then adopted (adopt_blob): its
+  fingerprint is taken and it either joins the blob that already has that
+  content, its own copy removed, or becomes that blob;
+- an output is adopted as it is kept (add_output);
+- a client that already knows the fingerprint asks first (start_claim): when
+  the server has that content, it asks for a few random ranges of it, and a
+  right answer (answer_claim) gets a record without sending the file. Knowing
+  the fingerprint alone is not enough to get the file.
+
+The fingerprint is SHA-256 over the SHA-256 of each FINGERPRINT_PIECE of the
+plain bytes in turn (static/js/library.js takes the same in the browser, with
+crypto.subtle, a piece at a time).
 """
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import os
+import secrets
 import shutil
 import threading
 import time
@@ -33,7 +59,7 @@ from typing import Any, Iterator
 from app.core import config_secret, encryption
 from app.core.config import FILE_CHUNK_BYTES as CHUNK_BYTES
 from app.core.config import Config
-from app.core.db import BUCKET_FILES, Record, Store, Transaction
+from app.core.db import BUCKET_BLOBS, BUCKET_FILES, Record, Store, Transaction
 from app.models import RestoreGoneError, deleted_long_ago, from_iso, mark_deleted, to_iso, unmark_deleted, utc_now
 from app.models import users
 
@@ -61,6 +87,15 @@ TYPE_MAX = 127
 STRAY_AGE_SECONDS = 24 * 60 * 60
 # How much a plain read takes at a time.
 READ_BYTES = 1024 * 1024
+# What the fingerprint hashes at a time. Never changed: the browser hashes
+# the same pieces, and every stored fingerprint was taken with it.
+FINGERPRINT_PIECE = 8 * 1024 * 1024
+FINGERPRINT_LENGTH = 64
+# What a claim asks for: how many ranges, how long each, and how long the
+# question stays open.
+CLAIM_RANGES = 4
+CLAIM_RANGE_BYTES = 64 * 1024
+CLAIM_SECONDS = 10 * 60
 
 
 class BadFileError(Exception):
@@ -94,6 +129,14 @@ class ChunkSizeError(Exception):
 
 class FileMissingError(Exception):
     """A record whose bytes are not there."""
+
+
+class ClaimError(Exception):
+    """A claim that does not hold: unknown, expired, someone else's, or a
+    wrong answer. The message is the same for each, on purpose."""
+
+    def __init__(self) -> None:
+        super().__init__("that claim does not hold")
 
 
 @dataclass
@@ -132,6 +175,9 @@ class File:
     pdf: dict[str, Any] = field(default_factory=dict)
     # When retention removes it; None keeps it. See app/models/retention.py.
     expires_at: datetime | None = None
+    # The fingerprint of the shared bytes it points at; "" while it still has
+    # its own (an upload, or one not adopted yet).
+    blob: str = ""
 
     @property
     def deleted(self) -> bool:
@@ -153,7 +199,7 @@ class File:
     def bound(self, index: int) -> bytes:
         """What a piece is sealed to. Without the count, a file cut off after
         a whole piece would still open."""
-        return f"{self.id}|{index}|{self.chunks}".encode()
+        return _bound(self.blob or self.id, index, self.chunks)
 
     def missing(self) -> list[int]:
         """The pieces still to send."""
@@ -185,6 +231,7 @@ class File:
             "pdf_error": self.pdf_error,
             "pdf": self.pdf,
             "expires_at": to_iso(self.expires_at),
+            "blob": self.blob,
         }
 
     @classmethod
@@ -213,7 +260,12 @@ class File:
             pdf_error=record.get("pdf_error", ""),
             pdf=record.get("pdf") or {},
             expires_at=from_iso(record.get("expires_at")),
+            blob=record.get("blob", ""),
         )
+
+
+def _bound(owner: str, index: int, chunks: int) -> bytes:
+    return f"{owner}|{index}|{chunks}".encode()
 
 
 def _bits(have: str, chunks: int) -> bytearray:
@@ -232,6 +284,19 @@ def upload_path(cfg: Config, file_id: str) -> Path:
 
 def finished_path(cfg: Config, file_id: str) -> Path:
     return cfg.files.dir / file_id
+
+
+def blobs_dir(cfg: Config) -> Path:
+    return cfg.files.dir / "blobs"
+
+
+def blob_path(cfg: Config, fingerprint: str) -> Path:
+    return blobs_dir(cfg) / fingerprint
+
+
+def stored_path(cfg: Config, file: File) -> Path:
+    """Where a finished file's bytes are: its blob's, or its own."""
+    return blob_path(cfg, file.blob) if file.blob else finished_path(cfg, file.id)
 
 
 def work_dir(cfg: Config) -> Path:
@@ -418,9 +483,10 @@ def add_output(
     pdf: dict[str, Any], expires_at: datetime | None,
 ) -> File:
     """Keep a file an action wrote at source (in the work directory) as an
-    output of run_id. A plain one is renamed into place, which costs nothing;
-    an encrypted one is sealed piece by piece into place and source removed.
-    Counts against the quota like an upload."""
+    output of run_id, sharing the bytes of any file with the same content.
+    New content becomes a blob: plain, it is renamed into place, which costs
+    nothing; encrypted, it is sealed piece by piece and source removed.
+    Counts against the quota like an upload, shared or not."""
     name = clean_name(name)[:NAME_MAX] or "output.pdf"
     size = source.stat().st_size
     now = utc_now()
@@ -449,25 +515,36 @@ def add_output(
         if _used_bytes(transaction, user_id) + size > cfg.files.quota_bytes_per_user:
             raise FileQuotaError()
         transaction.put(BUCKET_FILES, file.id, file.to_record())
-    cfg.files.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    target = finished_path(cfg, file.id)
     try:
-        if encrypted:
-            seal_into(cfg, file, source, target)
-            source.unlink(missing_ok=True)
-        else:
-            os.chmod(source, 0o600)
-            source.rename(target)
+        fingerprint = fingerprint_path(source)
+        blobs_dir(cfg).mkdir(mode=0o700, parents=True, exist_ok=True)
+        with _blob_lock:
+            blob = _usable_blob(store, cfg, fingerprint, size)
+            if blob is None:
+                blob = _new_blob(cfg, fingerprint, size, encrypted)
+                target = blob_path(cfg, fingerprint)
+                if encrypted:
+                    _seal_pieces(cfg, blob, _read_pieces(source), target)
+                    source.unlink(missing_ok=True)
+                else:
+                    os.chmod(source, 0o600)
+                    source.rename(target)
+                store.put(BUCKET_BLOBS, fingerprint, blob)
+            else:
+                source.unlink(missing_ok=True)
+
+            def mutate(record: Record) -> None:
+                _link_record(record, blob)
+                record["state"] = READY
+
+            store.update_value(BUCKET_FILES, file.id, mutate)
     except BaseException:
         store.delete_where(BUCKET_FILES, lambda key, record: key == file.id)
-        target.unlink(missing_ok=True)
         raise
-
-    def mutate(record: Record) -> None:
-        record["state"] = READY
-
-    store.update_value(BUCKET_FILES, file.id, mutate)
     file.state = READY
+    file.blob = blob["id"]
+    file.encrypted = blob["encrypted"]
+    file.key = blob["key"]
     return file
 
 
@@ -495,7 +572,7 @@ def plain_copy(cfg: Config, file: File, target: Path) -> None:
 
 def readable_path(cfg: Config, file: File) -> Path:
     """Where the file's bytes can be read as they are, for a plain file."""
-    return finished_path(cfg, file.id)
+    return stored_path(cfg, file)
 
 
 def set_pdf_info(store: Store, file_id: str, state: str, info: dict[str, Any], error: str = "") -> None:
@@ -578,7 +655,7 @@ class FileReader:
         self.file = file
         self.key = _file_key(cfg, file) if file.encrypted else b""
         try:
-            self.source = finished_path(cfg, file.id).open("rb")
+            self.source = stored_path(cfg, file).open("rb")
         except FileNotFoundError:
             raise FileMissingError() from None
         if os.fstat(self.source.fileno()).st_size != file.stored_size:
@@ -624,7 +701,8 @@ def sweep_files(store: Store, cfg: Config) -> tuple[int, int]:
     for file_id in doomed:
         upload_path(cfg, file_id).unlink(missing_ok=True)
         finished_path(cfg, file_id).unlink(missing_ok=True)
-    return removed, _remove_strays(store, cfg)
+    # After the records, so a blob whose last record just went goes too.
+    return removed, _remove_strays(store, cfg) + _sweep_blobs(store, cfg)
 
 
 def _remove_strays(store: Store, cfg: Config) -> int:
@@ -644,11 +722,343 @@ def _remove_strays(store: Store, cfg: Config) -> int:
             candidates += [path for path in directory.iterdir() if path.is_file() and not path.is_symlink() and path.stat().st_mtime < old]
     if not candidates:
         return count
-    known = {str(key) for key, _ in store.all(BUCKET_FILES)}
+    # A record that shares a blob has no bytes of its own any more.
+    known = {str(key) for key, record in store.all(BUCKET_FILES) if not (record.get("blob") and record["state"] == READY)}
     strays = [path for path in candidates if path.name not in known]
     for path in strays:
         path.unlink(missing_ok=True)
     return count + len(strays)
+
+
+# ---- shared bytes ------------------------------------------------------------
+
+# Held while a blob is made, joined or removed, so two files with the same new
+# content make one blob, and the sweep never removes one being joined.
+_blob_lock = threading.RLock()
+
+
+class Fingerprinter:
+    """The fingerprint, fed the plain bytes in any sized parts."""
+
+    def __init__(self) -> None:
+        self.outer = hashlib.sha256()
+        self.piece = hashlib.sha256()
+        self.filled = 0
+
+    def update(self, data: bytes) -> None:
+        view = memoryview(data)
+        while view:
+            take = min(len(view), FINGERPRINT_PIECE - self.filled)
+            self.piece.update(view[:take])
+            self.filled += take
+            view = view[take:]
+            if self.filled == FINGERPRINT_PIECE:
+                self.outer.update(self.piece.digest())
+                self.piece = hashlib.sha256()
+                self.filled = 0
+
+    def hexdigest(self) -> str:
+        outer = self.outer.copy()
+        if self.filled:
+            outer.update(self.piece.digest())
+        return outer.hexdigest()
+
+
+def fingerprint_of(pieces: Iterator[bytes]) -> str:
+    taker = Fingerprinter()
+    for piece in pieces:
+        taker.update(piece)
+    return taker.hexdigest()
+
+
+def _read_pieces(path: Path, size: int = READ_BYTES) -> Iterator[bytes]:
+    with path.open("rb") as reader:
+        while piece := reader.read(size):
+            yield piece
+
+
+def fingerprint_path(path: Path) -> str:
+    return fingerprint_of(_read_pieces(path))
+
+
+def valid_fingerprint(value: str) -> bool:
+    return len(value) == FINGERPRINT_LENGTH and all(character in "0123456789abcdef" for character in value)
+
+
+def _new_blob(cfg: Config, fingerprint: str, size: int, encrypted: bool) -> Record:
+    return {
+        "id": fingerprint,
+        "size": size,
+        "chunks": chunk_count(size),
+        "encrypted": encrypted,
+        "key": _new_key(cfg) if encrypted else "",
+        "created_at": to_iso(utc_now()),
+    }
+
+
+def _blob_stored_size(blob: Record) -> int:
+    return blob["size"] + blob["chunks"] * CHUNK_OVERHEAD if blob["encrypted"] else blob["size"]
+
+
+def _usable_blob(store: Store, cfg: Config, fingerprint: str, size: int) -> Record | None:
+    """The blob with this content, when its bytes are there as they should be.
+    One whose bytes went missing is dropped, so the next file makes it again."""
+    blob = store.get(BUCKET_BLOBS, fingerprint)
+    if blob is None:
+        return None
+    try:
+        intact = blob["size"] == size and blob_path(cfg, fingerprint).stat().st_size == _blob_stored_size(blob)
+    except FileNotFoundError:
+        intact = False
+    if not intact and blob["size"] == size:
+        store.delete_where(BUCKET_BLOBS, lambda key, record: key == fingerprint)
+        return None
+    return blob if intact else None
+
+
+def _link_record(record: Record, blob: Record) -> None:
+    record["blob"] = blob["id"]
+    record["encrypted"] = blob["encrypted"]
+    record["key"] = blob["key"]
+
+
+def _pieces_of(pieces: Iterator[bytes], size: int) -> Iterator[bytes]:
+    """The same bytes cut into parts of exactly size (the last may be short)."""
+    held = bytearray()
+    for piece in pieces:
+        held += piece
+        while len(held) >= size:
+            yield bytes(held[:size])
+            del held[:size]
+    if held:
+        yield bytes(held)
+
+
+def _seal_pieces(cfg: Config, blob: Record, pieces: Iterator[bytes], target: Path) -> None:
+    """Write plain bytes to target as the blob's sealed pieces, through a
+    temporary name, so target is whole or absent."""
+    key = encryption.xchacha_decrypt_string(encryption.subkey(cfg.secret_key, encryption.PURPOSE_FILES), blob["key"])
+    partial = target.with_name(target.name + ".partial")
+    descriptor = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as writer:
+            for index, plain in enumerate(_pieces_of(pieces, CHUNK_BYTES)):
+                writer.write(encryption.xchacha_encrypt_bound(key, plain, _bound(blob["id"], index, blob["chunks"])))
+            writer.flush()
+            os.fsync(writer.fileno())
+        partial.rename(target)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+
+
+def adopt_blob(store: Store, cfg: Config, file_id: str) -> bool:
+    """Move a finished file with its own bytes onto the shared ones: join the
+    blob with the same content, removing its own copy, or become that blob.
+    False when there was nothing to do (already shared, gone, unfinished)."""
+    file = get_file(store, file_id)
+    if file is None or file.blob or file.state != READY:
+        return False
+    own = finished_path(cfg, file.id)
+    reader = FileReader(cfg, file)
+    fingerprint = fingerprint_of(iter(reader))
+    blobs_dir(cfg).mkdir(mode=0o700, parents=True, exist_ok=True)
+    with _blob_lock:
+        blob = _usable_blob(store, cfg, fingerprint, file.size)
+        if blob is None:
+            blob = _new_blob(cfg, fingerprint, file.size, file.encrypted)
+            target = blob_path(cfg, fingerprint)
+            if file.encrypted:
+                # Sealed again, to the blob's own key and fingerprint.
+                _seal_pieces(cfg, blob, iter(FileReader(cfg, file)), target)
+            else:
+                target.unlink(missing_ok=True)
+                os.link(own, target)
+            store.put(BUCKET_BLOBS, fingerprint, blob)
+        linked = False
+
+        def mutate(record: Record) -> None:
+            nonlocal linked
+            if record.get("blob"):
+                return
+            _link_record(record, blob)
+            linked = True
+
+        store.update_value(BUCKET_FILES, file.id, mutate)
+    if linked:
+        own.unlink(missing_ok=True)
+    return linked
+
+
+def files_to_adopt(store: Store) -> list[str]:
+    """Finished files that still have their own bytes: what a start picks up,
+    including every file from before bytes were shared."""
+    return [
+        str(key) for key, record in store.all(BUCKET_FILES)
+        if record["state"] == READY and not record.get("blob") and record.get("deleted_at") is None
+    ]
+
+
+def sibling_pdf(store: Store, fingerprint: str, but: str) -> tuple[str, dict[str, Any], str] | None:
+    """What reading another import with the same bytes found, so the same
+    content is not read twice: (pdf_state, pdf, pdf_error)."""
+    for key, record in store.all(BUCKET_FILES):
+        if str(key) != but and record.get("blob") == fingerprint and record.get("pdf_state", PDF_PENDING) != PDF_PENDING:
+            return record["pdf_state"], record.get("pdf") or {}, record.get("pdf_error", "")
+    return None
+
+
+def disk_used(store: Store) -> int:
+    """What the files take on disk: each blob once, and every file that still
+    has its own bytes (uploads, files not adopted yet, the bin)."""
+    shared = sum(_blob_stored_size(blob) for _, blob in store.all(BUCKET_BLOBS))
+    own = sum(
+        record["size"] for _, record in store.all(BUCKET_FILES)
+        if not record.get("blob")
+    )
+    return shared + own
+
+
+# ---- claims: a file the server already has, without sending it ---------------
+
+@dataclass
+class _Claim:
+    user_id: int
+    fingerprint: str
+    ranges: list[tuple[int, int]]
+    expires: float
+    name: str
+    type: str
+    size: int
+    folder: str
+    expires_at: datetime | None
+
+
+_claims: dict[str, _Claim] = {}
+_claims_lock = threading.Lock()
+
+
+def _read_plain_range(cfg: Config, blob: Record, offset: int, length: int) -> bytes:
+    """length plain bytes of the blob from offset."""
+    path = blob_path(cfg, blob["id"])
+    with path.open("rb") as reader:
+        if not blob["encrypted"]:
+            reader.seek(offset)
+            return reader.read(length)
+        key = encryption.xchacha_decrypt_string(encryption.subkey(cfg.secret_key, encryption.PURPOSE_FILES), blob["key"])
+        out = bytearray()
+        first, last = offset // CHUNK_BYTES, (offset + length - 1) // CHUNK_BYTES
+        for index in range(first, last + 1):
+            plain_length = blob["size"] - index * CHUNK_BYTES if index == blob["chunks"] - 1 else CHUNK_BYTES
+            reader.seek(index * (CHUNK_BYTES + CHUNK_OVERHEAD))
+            sealed = reader.read(plain_length + CHUNK_OVERHEAD)
+            out += encryption.xchacha_decrypt_bound(key, sealed, _bound(blob["id"], index, blob["chunks"]))
+        start = offset - first * CHUNK_BYTES
+        return bytes(out[start:start + length])
+
+
+def start_claim(
+    store: Store, cfg: Config, user_id: int, fingerprint: str, name: str, declared_type: str, size: int,
+    folder: str = "", expires_at: datetime | None = None,
+) -> tuple[str, list[tuple[int, int]]] | None:
+    """The question for a client that says it has a file with this content:
+    (claim id, the ranges to hash), or None when the server does not have it
+    and the file has to be sent. The checks a new upload gets come first, so
+    an answer is never wasted on a file that would be refused."""
+    name = clean_name(name)
+    if not name or len(name.encode()) > NAME_MAX or size < 0 or len(declared_type.encode()) > TYPE_MAX or not valid_fingerprint(fingerprint):
+        raise BadFileError()
+    if size > cfg.files.max_file_bytes:
+        raise FileTooLargeError()
+    if storage_used(store, user_id) + size > cfg.files.quota_bytes_per_user:
+        raise FileQuotaError()
+    with _blob_lock:
+        blob = _usable_blob(store, cfg, fingerprint, size)
+    if blob is None or size == 0:
+        return None
+    span = min(CLAIM_RANGE_BYTES, size)
+    ranges = [(secrets.randbelow(size - span + 1), span) for _ in range(CLAIM_RANGES)]
+    claim_id = encryption.url_token(16)
+    now = time.monotonic()
+    with _claims_lock:
+        for key in [key for key, claim in _claims.items() if claim.expires < now]:
+            del _claims[key]
+        _claims[claim_id] = _Claim(user_id, fingerprint, ranges, now + CLAIM_SECONDS, name, declared_type, size, clean_folder(folder), expires_at)
+    return claim_id, ranges
+
+
+def answer_claim(store: Store, cfg: Config, user_id: int, claim_id: str, hashes: list[str]) -> File:
+    """Check the SHA-256 of each range asked for, and on a right answer add
+    the file, sharing the blob's bytes. A claim is answered once, right or
+    wrong. Raises ClaimError, or FileQuotaError as an upload would."""
+    with _claims_lock:
+        claim = _claims.pop(claim_id, None)
+    if claim is None or claim.user_id != user_id or claim.expires < time.monotonic() or len(hashes) != len(claim.ranges):
+        raise ClaimError()
+    with _blob_lock:
+        blob = _usable_blob(store, cfg, claim.fingerprint, claim.size)
+        if blob is None:
+            raise ClaimError()
+        for (offset, length), answer in zip(claim.ranges, hashes):
+            wanted = hashlib.sha256(_read_plain_range(cfg, blob, offset, length)).hexdigest()
+            if not isinstance(answer, str) or not hmac.compare_digest(wanted, answer.lower()):
+                raise ClaimError()
+        now = utc_now()
+        file = File(
+            id=encryption.url_token(12),
+            user_id=user_id,
+            name=claim.name,
+            type=claim.type,
+            size=claim.size,
+            chunks=blob["chunks"],
+            received=blob["chunks"],
+            state=READY,
+            key=blob["key"],
+            created_at=now,
+            updated_at=now,
+            encrypted=blob["encrypted"],
+            folder=claim.folder,
+            expires_at=claim.expires_at,
+            blob=blob["id"],
+        )
+        found = sibling_pdf(store, blob["id"], file.id)
+        if found is not None:
+            file.pdf_state, file.pdf, file.pdf_error = found
+        with store.transaction() as transaction:
+            if _used_bytes(transaction, user_id) + file.size > cfg.files.quota_bytes_per_user:
+                raise FileQuotaError()
+            transaction.put(BUCKET_FILES, file.id, file.to_record())
+    return file
+
+
+def _sweep_blobs(store: Store, cfg: Config) -> int:
+    """Blobs no record names, and blob bytes with no blob record (old enough
+    that nothing is still writing them)."""
+    removed = 0
+    with _blob_lock:
+        named = {record.get("blob") for _, record in store.all(BUCKET_FILES) if record.get("blob")}
+        unused: list[str] = []
+
+        def gone(key: object, record: Record) -> bool:
+            if str(key) in named:
+                return False
+            unused.append(str(key))
+            return True
+
+        store.delete_where(BUCKET_BLOBS, gone)
+        for fingerprint in unused:
+            blob_path(cfg, fingerprint).unlink(missing_ok=True)
+            removed += 1
+        directory = blobs_dir(cfg)
+        if directory.is_dir():
+            old = time.time() - STRAY_AGE_SECONDS
+            known = {str(key) for key, _ in store.all(BUCKET_BLOBS)}
+            for path in directory.iterdir():
+                stem = path.name.removesuffix(".partial")
+                if path.is_file() and (path.name.endswith(".partial") or stem not in known) and path.stat().st_mtime < old:
+                    path.unlink(missing_ok=True)
+                    removed += 1
+    return removed
 
 
 class UploadLocks:

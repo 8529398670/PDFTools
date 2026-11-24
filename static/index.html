@@ -59,7 +59,8 @@
       <div class="offcanvas-body">
         <nav id="sidebar-nav" class="nav nav-pills flex-column w-100 gap-1" data-i18n-attr="aria-label:nav.sidebar_label">
           <!-- Account, first: its second line names who is signed in (App.labelAccount). -->
-          <a class="nav-link" href="/library" data-nav="library"><i class="bi bi-collection" aria-hidden="true"></i><span data-i18n="nav.library"></span></a>
+          <a class="nav-link" href="/tools" data-nav="tools"><i class="bi bi-tools" aria-hidden="true"></i><span data-i18n="nav.tools"></span></a>
+          <a class="nav-link" href="/library" data-nav="library"><i class="bi bi-folder2" aria-hidden="true"></i><span data-i18n="nav.library"></span></a>
           <a class="nav-link" href="/runs" data-nav="runs"><i class="bi bi-scissors" aria-hidden="true"></i><span data-i18n="nav.runs"></span></a>
           <a class="nav-link" href="/account" data-nav="account"><i class="bi bi-person-circle" aria-hidden="true"></i><span class="nav-link-text"><span data-i18n="nav.account"></span><span id="sidebar-user" class="nav-link-sub"></span><span id="view-only-badge" class="badge text-bg-secondary align-self-start mt-1" data-i18n="nav.view_only" hidden></span></span></a>
           <a class="nav-link" href="/appearance" data-nav="appearance"><i class="bi bi-palette" aria-hidden="true"></i><span data-i18n="nav.appearance"></span></a>
@@ -260,6 +261,47 @@
           <!-- Every device with a live session on this account; see sessions.js.
                Folded away until opened, and remembered open or shut in this
                browser. It is only fetched while open. -->
+          <!-- Where this account's tools run: a default and per-tool
+               overrides, kept on the account. See js/tool_modes.js. -->
+          <section class="card" data-write id="tool-modes-panel" data-path="/account/tool-modes" hidden>
+            <div class="card-body">
+              <h3 class="card-title" data-i18n="tool_modes.heading"></h3>
+              <p class="text-body-secondary" data-i18n="tool_modes.description"></p>
+              <form id="tool-modes-form" autocomplete="off">
+                <fieldset class="mb-2">
+                  <legend class="form-label fs-6" data-i18n="tool_modes.default_label"></legend>
+                  <div id="tool-modes-default" class="btn-group flex-wrap" role="group"></div>
+                  <div id="tool-modes-default-help" class="form-text"></div>
+                </fieldset>
+                <details class="card card-collapse mt-3" id="tool-modes-overrides">
+                  <summary class="card-header d-flex align-items-center gap-2">
+                    <span data-i18n="tool_modes.overrides_heading"></span>
+                    <span id="tool-modes-overrides-count" class="badge text-bg-primary" hidden></span>
+                  </summary>
+                  <div class="card-body">
+                    <p class="small text-body-secondary" data-i18n="tool_modes.overrides_help"></p>
+                    <div class="table-responsive">
+                      <table class="table table-sm align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th scope="col" data-i18n="tool_modes.table_tool"></th>
+                            <th scope="col" class="d-none d-md-table-cell" data-i18n="tool_modes.table_section"></th>
+                            <th scope="col" data-i18n="tool_modes.table_mode"></th>
+                          </tr>
+                        </thead>
+                        <tbody id="tool-modes-rows"></tbody>
+                      </table>
+                    </div>
+                  </div>
+                </details>
+                <div class="d-flex flex-wrap gap-2 mt-3">
+                  <button id="tool-modes-save" type="submit" class="btn btn-primary" data-i18n="tool_modes.save"></button>
+                  <button id="tool-modes-reset" type="button" class="btn btn-outline-secondary" data-i18n="tool_modes.reset"></button>
+                </div>
+              </form>
+            </div>
+          </section>
+
           <details class="card card-collapse" id="sessions-card">
             <summary class="card-header">
               <h3 class="card-title" data-i18n="sessions.heading"></h3>
@@ -345,6 +387,52 @@
 
         <!-- The Library: drop PDFs or whole folders in, and they are imported
              at once; then send any of them to an action. See js/library.js. -->
+        <!-- Tools, the home page: one collapsed accordion row per section,
+             filled from the catalog in js/tools.js. -->
+        <section class="view" data-view="tools" data-path="/tools" id="tools-panel" hidden>
+          <h2 class="view-title" data-i18n="tools.heading"></h2>
+          <p class="view-description" data-i18n="tools.description"></p>
+          <div id="tools-sections" class="accordion"></div>
+        </section>
+
+        <!-- One screen per built tool, opened from Tools. -->
+        <section class="view" data-view="tool-split-bookmarks" data-path="/tools/split-bookmarks" id="tool-split-bookmarks" hidden>
+          <p class="mb-2"><a href="/tools" class="link-secondary text-decoration-none"><i class="bi bi-arrow-left me-1" aria-hidden="true"></i><span data-i18n="tools.back"></span></a></p>
+          <h2 class="view-title" data-i18n="tools.items.split_bookmarks.title"></h2>
+            <!-- The tool's drop zone, the same as My files'. Where it runs is
+                 the account's choice (Account > Where your tools run), never
+                 shown here: on this device with qpdf as WebAssembly, or
+                 imported into My files for the server. See js/local.js. -->
+            <section id="local-card" class="card" hidden>
+              <div class="card-body">
+                <div id="local-drop-zone" class="drop-zone border border-2 rounded-3 p-4 p-lg-5 text-center">
+                  <i class="bi bi-file-earmark-arrow-up fs-1 text-body-secondary" aria-hidden="true"></i>
+                  <p class="lead mb-1" data-i18n="library.drop_title"></p>
+                  <p class="text-body-secondary" data-i18n="library.drop_hint"></p>
+                  <div class="d-flex flex-wrap justify-content-center gap-2">
+                    <button id="local-pick-button" type="button" class="btn btn-primary"><i class="bi bi-file-earmark-pdf me-1" aria-hidden="true"></i><span data-i18n="library.pick_files"></span></button>
+                    <button id="local-pick-folder-button" type="button" class="btn btn-outline-secondary"><i class="bi bi-folder2-open me-1" aria-hidden="true"></i><span data-i18n="library.pick_folder"></span></button>
+                  </div>
+                  <input id="local-pick" class="visually-hidden" type="file" accept=".pdf,application/pdf" multiple tabindex="-1" aria-hidden="true" />
+                  <input id="local-pick-folder" class="visually-hidden" type="file" multiple webkitdirectory tabindex="-1" aria-hidden="true" />
+                </div>
+                <div id="local-batch" class="mt-3" hidden>
+                  <div class="row g-2 align-items-center mb-2">
+                    <div class="col-12 col-md">
+                      <span id="local-summary" class="small text-body-secondary" aria-live="polite"></span>
+                    </div>
+                    <div class="col-12 col-md-auto row-actions">
+                      <button id="local-cancel" type="button" class="btn btn-sm btn-outline-secondary" data-i18n="local.cancel" hidden></button>
+                      <button id="local-save-folder" type="button" class="btn btn-sm btn-outline-primary" hidden><i class="bi bi-folder-symlink me-1" aria-hidden="true"></i><span data-i18n="local.save_folder"></span></button>
+                      <button id="local-download-all" type="button" class="btn btn-sm btn-primary" hidden><i class="bi bi-download me-1" aria-hidden="true"></i><span data-i18n="local.download_all"></span></button>
+                    </div>
+                  </div>
+                  <ul id="local-list" class="list-group list-group-flush small"></ul>
+                </div>
+              </div>
+            </section>
+        </section>
+
         <section class="view view-full" data-view="library" data-path="/library" id="library-panel" hidden>
           <h2 class="view-title" data-i18n="library.heading"></h2>
           <p class="view-description" data-i18n="library.description"></p>
@@ -376,44 +464,6 @@
               <div id="files-usage" class="mt-3" hidden>
                 <div id="files-usage-text" class="small text-body-secondary mb-1"></div>
                 <progress id="files-usage-bar" class="w-100" max="1" value="0" aria-labelledby="files-usage-text"></progress>
-              </div>
-            </div>
-          </section>
-
-          <!-- Split on this device: qpdf as WebAssembly, on files that are never
-               uploaded. Where splits run is this device's own choice. See
-               js/local.js. -->
-          <section id="local-card" class="card" hidden>
-            <div class="card-body">
-              <h3 class="card-title" data-i18n="local.heading"></h3>
-              <p class="text-body-secondary" data-i18n="local.description"></p>
-              <div class="row g-2 align-items-start">
-                <div class="col-12 col-md-6 col-lg-5">
-                  <label for="local-engine" class="form-label" data-i18n="local.engine_label"></label>
-                  <select id="local-engine" class="form-select" aria-describedby="local-engine-help">
-                    <option value="auto" data-i18n="local.engine_auto"></option>
-                    <option value="device" data-i18n="local.engine_device"></option>
-                    <option value="server" data-i18n="local.engine_server"></option>
-                  </select>
-                  <div id="local-engine-help" class="form-text"></div>
-                </div>
-                <div class="col-12 col-md-auto align-self-md-center">
-                  <button id="local-pick-button" type="button" class="btn btn-primary w-100"><i id="local-pick-icon" class="bi bi-cpu me-1" aria-hidden="true"></i><span id="local-pick-text"></span></button>
-                  <input id="local-pick" class="visually-hidden" type="file" accept=".pdf,application/pdf" multiple tabindex="-1" aria-hidden="true" />
-                </div>
-              </div>
-              <div id="local-batch" class="mt-3" hidden>
-                <div class="row g-2 align-items-center mb-2">
-                  <div class="col-12 col-md">
-                    <span id="local-summary" class="small text-body-secondary" aria-live="polite"></span>
-                  </div>
-                  <div class="col-12 col-md-auto row-actions">
-                    <button id="local-cancel" type="button" class="btn btn-sm btn-outline-secondary" data-i18n="local.cancel" hidden></button>
-                    <button id="local-save-folder" type="button" class="btn btn-sm btn-outline-primary" hidden><i class="bi bi-folder-symlink me-1" aria-hidden="true"></i><span data-i18n="local.save_folder"></span></button>
-                    <button id="local-download-all" type="button" class="btn btn-sm btn-primary" hidden><i class="bi bi-download me-1" aria-hidden="true"></i><span data-i18n="local.download_all"></span></button>
-                  </div>
-                </div>
-                <ul id="local-list" class="list-group list-group-flush small"></ul>
               </div>
             </div>
           </section>
@@ -881,6 +931,8 @@
   <script src="/js/sessions.js"></script>
   <script src="/js/library.js"></script>
   <script src="/js/local.js"></script>
+  <script src="/js/tools.js"></script>
+  <script src="/js/tool_modes.js"></script>
   <script src="/js/runs.js"></script>
   <script src="/js/retention.js"></script>
   <script src="/js/about.js"></script>

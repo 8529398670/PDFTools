@@ -9,6 +9,7 @@ from typing import Callable
 
 from app.core import encryption
 from app.core.db import Record
+from app.core.db import BUCKET_BLOBS
 from app.core.db import BUCKET_FILES
 from app.core.db import BUCKET_USERS
 
@@ -18,6 +19,7 @@ from app.core.db import BUCKET_USERS
 SEALED_FIELDS: dict[str, dict[str, str]] = {
     BUCKET_USERS: {"totp_secret": encryption.PURPOSE_TOTP, "totp_pending": encryption.PURPOSE_TOTP},
     BUCKET_FILES: {"key": encryption.PURPOSE_FILES},
+    BUCKET_BLOBS: {"key": encryption.PURPOSE_FILES},
 }
 
 

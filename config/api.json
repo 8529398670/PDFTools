@@ -643,6 +643,13 @@
             "type": "boolean",
             "x-feature": "appearance"
           },
+          "tool_modes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Where your tools run: \"*\" is your default, and a tool id its own override; each is auto, device or server. Missing: auto, and a tool follows your default.",
+            "type": "object"
+          },
           "two_factor": {
             "type": "boolean",
             "x-feature": "two_factor"
@@ -684,6 +691,7 @@
           "themes",
           "themes_builtins",
           "themes_custom",
+          "tool_modes",
           "two_factor",
           "two_factor_enabled",
           "version"
@@ -2535,6 +2543,93 @@
       },
       "x-feature": "appearance"
     },
+    "/api/account/tool-modes": {
+      "post": {
+        "description": "Replace where your tools run: \"*\" is your default and a tool id an override for that tool, each auto (this device when it is up to it, else the server), device (in the browser, nothing uploaded) or server. Send the whole set; a tool left out follows your default, and {} puts everything back to auto.",
+        "operationId": "post_api_account_tool_modes",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "tool_modes": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "\"*\" for your default and a tool id for that tool's own override, each auto, device or server, such as {\"*\": \"server\", \"split_bookmarks\": \"device\"}. Replaces the whole set; a tool left out follows your default, and {} puts everything back to auto.",
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "tool_modes"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "tool_modes": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "tool_modes"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Choose where your tools run",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
     "/api/account/two-factor/confirm": {
       "post": {
         "operationId": "post_api_account_two_factor_confirm",
@@ -3805,7 +3900,7 @@
     },
     "/api/admin/storage": {
       "get": {
-        "description": "How many bytes everyone's files use together, and the disk's free and total bytes where the system says.",
+        "description": "How many bytes everyone's files use together as quotas count them, what they take on disk with shared content stored once, and the disk's free and total bytes where the system says.",
         "operationId": "get_api_admin_storage",
         "responses": {
           "200": {
@@ -3821,11 +3916,17 @@
                       "description": "Left out where the system will not say.",
                       "type": "integer"
                     },
+                    "stored_bytes": {
+                      "description": "What those files take on disk: content several files share is stored once.",
+                      "type": "integer"
+                    },
                     "used_bytes": {
+                      "description": "Every account's files added up, the way quotas count them: a file several accounts hold counts for each.",
                       "type": "integer"
                     }
                   },
                   "required": [
+                    "stored_bytes",
                     "used_bytes"
                   ],
                   "type": "object"
@@ -6464,6 +6565,212 @@
           "Files"
         ],
         "x-bulk-of": "POST /api/files/{file_id}/restore"
+      },
+      "x-feature": "files"
+    },
+    "/api/claims": {
+      "post": {
+        "description": "Before uploading, say the file's fingerprint. When the server already holds that content (anyone's), it asks for the SHA-256 of a few random ranges of the file; a right answer to POST /api/claims/{claim_id} adds the file without sending it. The same checks as an upload come first: a file over files.max_file_bytes, or one that would pass your quota, is a 409. Ten minutes to answer.",
+        "operationId": "post_api_claims",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "fingerprint": {
+                    "description": "The file's content: SHA-256 over the SHA-256 of each 8 MiB piece of it in turn, as 64 lowercase hex digits.",
+                    "type": "string"
+                  },
+                  "folder": {
+                    "description": "The folder it came in, relative to a dropped folder: shown, never a path on disk.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "size": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "type": {
+                    "description": "Shown in the list. Downloads are always application/octet-stream.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "fingerprint",
+                  "name",
+                  "size"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "claim_id": {
+                      "description": "Where to send the answer. Empty when found is false.",
+                      "type": "string"
+                    },
+                    "found": {
+                      "description": "Whether the server already has this content. When it does not, upload the file as usual (POST /api/files).",
+                      "type": "boolean"
+                    },
+                    "ranges": {
+                      "description": "[offset, length] pairs: send the SHA-256 of each of these ranges of the file, in hex, in this order. Empty when found is false.",
+                      "items": {
+                        "items": {
+                          "type": "integer"
+                        },
+                        "type": "array"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "found"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Ask whether the server already has a file",
+        "tags": [
+          "Files"
+        ]
+      },
+      "x-feature": "files"
+    },
+    "/api/claims/{claim_id}": {
+      "post": {
+        "description": "The SHA-256 of each range POST /api/claims asked for. Right, and the file is yours, ready, without being sent: it shares the bytes the server already has. Wrong, unknown or expired is a 403, and the file has to be uploaded. A claim is answered once.",
+        "operationId": "post_api_claims_claim_id",
+        "parameters": [
+          {
+            "description": "From POST /api/claims.",
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "hashes": {
+                    "description": "The SHA-256 of each range asked for, in hex, in the same order.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "hashes"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/File"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Answer a claim",
+        "tags": [
+          "Files"
+        ]
       },
       "x-feature": "files"
     },

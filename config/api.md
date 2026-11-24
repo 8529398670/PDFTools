@@ -53,6 +53,7 @@ An error reply is a JSON object whose `error` says what went wrong.
 | POST | [`/api/account/shortcuts`](#post-apiaccountshortcuts) | Change your keyboard shortcuts | browser session or API key, anyone signed in |
 | POST | [`/api/account/theme`](#post-apiaccounttheme) | Pick your theme | browser session or API key, anyone signed in |
 | POST | [`/api/account/themes`](#post-apiaccountthemes) | Replace your own themes | browser session or API key, anyone signed in |
+| POST | [`/api/account/tool-modes`](#post-apiaccounttool-modes) | Choose where your tools run | browser session or API key, anyone signed in |
 | POST | [`/api/account/two-factor/confirm`](#post-apiaccounttwo-factorconfirm) | Turn two-factor on | browser session only, anyone signed in |
 | POST | [`/api/account/two-factor/disable`](#post-apiaccounttwo-factordisable) | Turn two-factor off | browser session only, anyone signed in |
 | POST | [`/api/account/two-factor/start`](#post-apiaccounttwo-factorstart) | Begin two-factor setup | browser session only, anyone signed in |
@@ -331,6 +332,31 @@ Replace your whole list of color themes (1 to 40) and pick the one you use. them
 | `themes_builtins` | integer | yes |  | Which built-in themes that list has seen (see builtins on POST /api/account/themes). |
 | `themes_custom` | boolean | yes |  |  |
 
+### POST /api/account/tool-modes
+
+Choose where your tools run
+
+Replace where your tools run: "*" is your default and a tool id an override for that tool, each auto (this device when it is up to it, else the server), device (in the browser, nothing uploaded) or server. Send the whole set; a tool left out follows your default, and {} puts everything back to auto.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 403, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `tool_modes` | map of string | yes |  | "*" for your default and a tool id for that tool's own override, each auto, device or server, such as {"*": "server", "split_bookmarks": "device"}. Replaces the whole set; a tool left out follows your default, and {} puts everything back to auto. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `ok` | boolean | yes |  |  |
+| `tool_modes` | map of string | yes |  |  |
+
 ### POST /api/account/two-factor/confirm
 
 Turn two-factor on
@@ -579,6 +605,8 @@ Finish a sign-in with a code
 | GET | [`/api/admin/storage`](#get-apiadminstorage) | Storage for everyone | browser session or API key, admins |
 | POST | [`/api/bulk/files/delete`](#post-apibulkfilesdelete) | Delete a file, for many at once | browser session or API key, anyone signed in |
 | POST | [`/api/bulk/files/restore`](#post-apibulkfilesrestore) | Restore a deleted file, for many at once | browser session or API key, anyone signed in |
+| POST | [`/api/claims`](#post-apiclaims) | Ask whether the server already has a file | browser session or API key, anyone signed in |
+| POST | [`/api/claims/{claim_id}`](#post-apiclaimsclaim_id) | Answer a claim | browser session or API key, anyone signed in |
 | GET | [`/api/files`](#get-apifiles) | List your files | browser session or API key, anyone signed in |
 | POST | [`/api/files`](#post-apifiles) | Start an upload | browser session or API key, anyone signed in |
 | GET | [`/api/files/{file_id}`](#get-apifilesfile_id) | One of your files | browser session or API key, anyone signed in |
@@ -764,7 +792,7 @@ Put back a deleted file
 
 Storage for everyone
 
-How many bytes everyone's files use together, and the disk's free and total bytes where the system says.
+How many bytes everyone's files use together as quotas count them, what they take on disk with shared content stored once, and the disk's free and total bytes where the system says.
 
 |  |  |
 |---|---|
@@ -777,7 +805,8 @@ How many bytes everyone's files use together, and the disk's free and total byte
 |---|---|---|---|---|
 | `disk_free_bytes` | integer | no |  | Left out where the system will not say. |
 | `disk_total_bytes` | integer | no |  | Left out where the system will not say. |
-| `used_bytes` | integer | yes |  |  |
+| `stored_bytes` | integer | yes |  | What those files take on disk: content several files share is stored once. |
+| `used_bytes` | integer | yes |  | Every account's files added up, the way quotas count them: a file several accounts hold counts for each. |
 
 ### POST /api/bulk/files/delete
 
@@ -826,6 +855,64 @@ Runs POST /api/files/{file_id}/restore once per item: items holds each one's id 
 **Reply 200**: Success
 
 [`BulkReply`](#bulkreply).
+
+### POST /api/claims
+
+Ask whether the server already has a file
+
+Before uploading, say the file's fingerprint. When the server already holds that content (anyone's), it asks for the SHA-256 of a few random ranges of the file; a right answer to POST /api/claims/{claim_id} adds the file without sending it. The same checks as an upload come first: a file over files.max_file_bytes, or one that would pass your quota, is a 409. Ten minutes to answer.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 403, 404, 409, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `fingerprint` | string | yes |  | The file's content: SHA-256 over the SHA-256 of each 8 MiB piece of it in turn, as 64 lowercase hex digits. |
+| `folder` | string | no |  | The folder it came in, relative to a dropped folder: shown, never a path on disk. |
+| `name` | string | yes |  |  |
+| `size` | integer | yes | at least 0 |  |
+| `type` | string | no |  | Shown in the list. Downloads are always application/octet-stream. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `claim_id` | string | no |  | Where to send the answer. Empty when found is false. |
+| `found` | boolean | yes |  | Whether the server already has this content. When it does not, upload the file as usual (POST /api/files). |
+| `ranges` | array of array of integer | no |  | [offset, length] pairs: send the SHA-256 of each of these ranges of the file, in hex, in this order. Empty when found is false. |
+
+### POST /api/claims/{claim_id}
+
+Answer a claim
+
+The SHA-256 of each range POST /api/claims asked for. Right, and the file is yours, ready, without being sent: it shares the bytes the server already has. Wrong, unknown or expired is a 403, and the file has to be uploaded. A claim is answered once.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 403, 404, 409, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `claim_id` | path | string | yes |  | From POST /api/claims. |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `hashes` | array of string | yes |  | The SHA-256 of each range asked for, in hex, in the same order. |
+
+**Reply 201**: Created
+
+[`File`](#file).
 
 ### GET /api/files
 
@@ -2703,6 +2790,7 @@ The shapes the routes above refer to by name.
 | `themes` | array of [`Theme`](#theme) or null | yes |  | Your themes (see the Theme schema): your own list, else the app's defaults, else null for the built-in ones. |
 | `themes_builtins` | integer | yes |  | Which built-in themes that list has seen (see builtins on POST /api/account/themes). |
 | `themes_custom` | boolean | yes |  | Whether you have your own list rather than following the defaults. |
+| `tool_modes` | map of string | yes |  | Where your tools run: "*" is your default, and a tool id its own override; each is auto, device or server. Missing: auto, and a tool follows your default. |
 | `two_factor` | boolean | yes |  |  |
 | `two_factor_enabled` | boolean | yes |  |  |
 | `version` | string | yes |  | The running build. dev when none was stamped. |

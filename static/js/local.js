@@ -1,19 +1,22 @@
-// Split on this device: the Library card that splits PDFs in the browser, with
+// Split by bookmarks level: the tool screen that splits PDFs in the browser, with
 // qpdf compiled to WebAssembly (js/local/worker.js runs it; the split itself is
 // js/local/split_bookmarks.js, the same split as the server's). The PDFs are
 // never uploaded: the sections are saved straight from this page.
 //
-// Where splits run is this device's own choice, kept in localStorage:
+// Where splits run is the account's choice (Tools.mode, set on Account >
+// Where your tools run; see js/tool_modes.js):
 // - Automatic: this device if it looks up to it (WebAssembly and workers, at
 //   least 4 cores, and at least 4 GB where the browser says), else the server;
 // - This device: always here, if the browser can at all;
-// - The server: PDFs picked here are imported into the library instead.
+// - The server: PDFs picked here are imported into My files instead.
 //
 // Results land in the origin's private disk (OPFS) under a folder per batch,
 // so a run of large sections never sits in memory. Folders older than a day
 // are cleared when the page loads.
 const Local = {
-  prefKey: "pdftools-engine.split_bookmarks",
+  tool: "split_bookmarks",
+  // Where the choice lived before it moved to the account; cleared on load.
+  oldPrefKey: "pdftools-engine.split_bookmarks",
   store: "pdftools-local",
   keepHours: 24,
   minCores: 4,
@@ -26,26 +29,27 @@ const Local = {
   urls: [],
 
   init( me ) {
+    try { window.localStorage.removeItem( this.oldPrefKey ); } catch ( error ) { /* private mode */ }
     if ( me.files_enabled === false ) return;
     const card = Dom.get( "local-card" );
     Dom.show( card , true );
-    const select = Dom.get( "local-engine" );
-    select.value = this.preference();
-    select.addEventListener( "change" , () => {
-      try { window.localStorage.setItem( this.prefKey , select.value ); } catch ( error ) { /* private mode */ }
-      this.paintEngine();
-    } );
-    const input = Dom.get( "local-pick" );
-    Dom.get( "local-pick-button" ).addEventListener( "click" , () => input.click() );
-    input.addEventListener( "change" , () => {
-      const files = Array.from( input.files );
-      input.value = "";
-      this.picked( files );
+    Dom.show( Dom.get( "tool-split-bookmarks" ) , true );
+    [ [ "local-pick-button" , "local-pick" ] , [ "local-pick-folder-button" , "local-pick-folder" ] ].forEach( ( pair ) => {
+      const input = Dom.get( pair[ 1 ] );
+      Dom.get( pair[ 0 ] ).addEventListener( "click" , () => input.click() );
+      input.addEventListener( "change" , () => {
+        const chosen = Array.from( input.files ).map( ( file ) => {
+          const path = file.webkitRelativePath || "";
+          return { file: file , folder: path.includes( "/" ) ? path.slice( 0 , path.lastIndexOf( "/" ) ) : "" };
+        } );
+        input.value = "";
+        this.picked( chosen );
+      } );
     } );
     Dom.onPress( Dom.get( "local-cancel" ) , () => this.cancel() );
     Dom.onPress( Dom.get( "local-download-all" ) , () => this.downloadAll() );
     Dom.onPress( Dom.get( "local-save-folder" ) , () => this.saveToFolder() );
-    this.watchDrops( card );
+    this.watchDrops( Dom.get( "tool-split-bookmarks" ) );
     window.addEventListener( "beforeunload" , ( event ) => {
       if ( this.running ) event.preventDefault();
     } );
@@ -57,9 +61,7 @@ const Local = {
   // ---- where it runs ---------------------------------------------------------
 
   preference() {
-    let value = "auto";
-    try { value = window.localStorage.getItem( this.prefKey ) || "auto"; } catch ( error ) { /* private mode */ }
-    return [ "auto" , "device" , "server" ].includes( value ) ? value : "auto";
+    return Tools.mode( this.tool );
   },
 
   // What this device has. deviceMemory is Chromium's, rounded and capped at 8;
@@ -80,57 +82,59 @@ const Local = {
     return device.capable ? "device" : "server";
   },
 
+  // Where it runs is not shown here (it is set on Account); only whether a
+  // batch is under way, which holds the pickers.
   paintEngine() {
-    const device = this.device();
-    const preference = this.preference();
-    const memory = device.memory === null ? "" : I18n.get( "local.memory" ).replace( "{gb}" , device.memory );
-    let help;
-    if ( !device.supported ) help = I18n.get( "local.unsupported" );
-    else if ( preference === "auto" ) help = I18n.get( device.capable ? "local.auto_device" : "local.auto_server" ).replace( "{cores}" , device.cores ).replace( "{memory}" , memory );
-    else help = I18n.get( preference === "device" ? "local.device_help" : "local.server_help" );
-    Dom.text( Dom.get( "local-engine-help" ) , help );
-    const here = this.engine() === "device";
-    Dom.text( Dom.get( "local-pick-text" ) , I18n.get( here ? "local.pick_device" : "local.pick_server" ) );
-    Dom.get( "local-pick-icon" ).className = "bi me-1 " + ( here ? "bi-cpu" : "bi-cloud-arrow-up" );
     Dom.get( "local-pick-button" ).disabled = this.running;
+    Dom.get( "local-pick-folder-button" ).disabled = this.running;
   },
 
   // ---- choosing ----------------------------------------------------------------
 
-  // A drop on this card is the card's, not the Library's import (which takes
-  // drops anywhere else on the screen).
-  watchDrops( card ) {
+  // The whole tool screen takes a drop, of files or folders, as My files
+  // does (Library.walk reads the folders; their entries have to be taken
+  // during the drop event itself, before anything is awaited).
+  watchDrops( panel ) {
     const carriesFiles = ( event ) => Array.from( event.dataTransfer.types ).includes( "Files" );
-    [ "dragenter" , "dragover" ].forEach( ( name ) => card.addEventListener( name , ( event ) => {
+    const mark = ( on ) => Dom.get( "local-drop-zone" ).classList.toggle( "file-drop-active" , on );
+    [ "dragenter" , "dragover" ].forEach( ( name ) => panel.addEventListener( name , ( event ) => {
       if ( !carriesFiles( event ) ) return;
       event.preventDefault();
-      event.stopPropagation();
-      card.classList.add( "file-drop-active" );
+      mark( true );
     } ) );
-    card.addEventListener( "dragleave" , ( event ) => {
-      if ( !card.contains( event.relatedTarget ) ) card.classList.remove( "file-drop-active" );
+    panel.addEventListener( "dragleave" , ( event ) => {
+      if ( !panel.contains( event.relatedTarget ) ) mark( false );
     } );
-    card.addEventListener( "drop" , ( event ) => {
+    panel.addEventListener( "drop" , async ( event ) => {
       if ( !carriesFiles( event ) ) return;
       event.preventDefault();
-      event.stopPropagation();
-      card.classList.remove( "file-drop-active" );
-      this.picked( Array.from( event.dataTransfer.files ) );
+      mark( false );
+      const entries = Array.from( event.dataTransfer.items || [] )
+        .map( ( item ) => item.webkitGetAsEntry ? item.webkitGetAsEntry() : null )
+        .filter( Boolean );
+      const plain = Array.from( event.dataTransfer.files ).map( ( file ) => ( { file: file , folder: "" } ) );
+      try {
+        this.picked( entries.length ? await Library.walk( entries ) : plain );
+      } catch ( error ) {
+        App.showError( error.message );
+      }
     } );
   },
 
-  picked( files ) {
-    const pdfs = files.filter( ( file ) => Library.isPdf( file ) );
-    const skipped = files.length - pdfs.length;
+  // chosen: { file , folder } from a picker or a drop. On the server they are
+  // imported into My files, keeping their folders; here they are split.
+  picked( chosen ) {
+    const pdfs = chosen.filter( ( item ) => Library.isPdf( item.file ) );
+    const skipped = chosen.length - pdfs.length;
     if ( skipped > 0 ) Dom.toast( I18n.get( "library.skipped" ).replace( "{count}" , skipped ) , "error" );
     if ( pdfs.length === 0 ) return;
     if ( this.engine() === "server" ) {
-      Library.enqueue( pdfs.map( ( file ) => ( { file: file , folder: "" } ) ) );
+      Library.enqueue( pdfs );
       Dom.toast( I18n.get( "local.imported_for_server" ).replace( "{count}" , pdfs.length ) , "ok" );
       return;
     }
     if ( this.running ) return;
-    this.start( pdfs );
+    this.start( pdfs.map( ( item ) => item.file ) );
   },
 
   // ---- the worker -------------------------------------------------------------

@@ -57,6 +57,9 @@ BUCKET_META = "meta"
 BUCKET_RETENTION = "retention"
 # One action run on one file: a split, ... See app/models/runs.py.
 BUCKET_RUNS = "runs"
+# The stored bytes, one record per distinct content, shared by every file
+# record (any account's) with that content. See app/models/files.py.
+BUCKET_BLOBS = "blobs"
 
 BUCKETS = (
     BUCKET_USERS,
@@ -73,6 +76,7 @@ BUCKETS = (
     BUCKET_META,
     BUCKET_RETENTION,
     BUCKET_RUNS,
+    BUCKET_BLOBS,
 )
 
 # How long a writer waits for another writer before giving up. Without it a

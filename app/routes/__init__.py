@@ -58,6 +58,7 @@ from app.routes import (
     shortcuts,
     team,
     themes,
+    tool_modes,
     two_factor,
 )
 from app.routes.files import RequireFiles
@@ -104,6 +105,7 @@ MODULES = [
     shortcuts,
     team,
     themes,
+    tool_modes,
     two_factor,
 ]
 

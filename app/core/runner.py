@@ -102,9 +102,16 @@ class Runner:
                 if run.state == runs.RUNNING:
                     runs.update(self.store, run.id, state=runs.QUEUED)
                 self.submit(run.id)
+            looking = set()
             for file in files.all_files(self.store):
                 if file.state == files.READY and not file.deleted and file.kind == files.KIND_IMPORT and file.pdf_state == files.PDF_PENDING:
+                    looking.add(file.id)
                     self.look_at(file.id)
+            # Files that still have their own bytes, from before an adoption
+            # was cut off or from before bytes were shared at all.
+            for file_id in files.files_to_adopt(self.store):
+                if file_id not in looking:
+                    self.looks.submit(self._adopt, file_id)
         except Exception:  # noqa: BLE001 -- a bad record must not stop the server
             traceback.print_exc()
 
@@ -112,15 +119,34 @@ class Runner:
         with self._lock:
             return self.stopping.is_set() or run_id in self._cancelled
 
-    def _look(self, file_id: str) -> None:
-        """The first look at an import: is it a PDF, how many pages, how deep
-        do its bookmarks go."""
+    def _adopt(self, file_id: str) -> None:
+        """Move a file onto the shared bytes (files.adopt_blob). A failure is
+        logged and the file keeps its own bytes; the next start tries again."""
         if self.stopping.is_set():
             return
+        try:
+            files.adopt_blob(self.store, self.settings.get(), file_id)
+        except Exception:  # noqa: BLE001 -- the file is fine as it is
+            traceback.print_exc()
+
+    def _look(self, file_id: str) -> None:
+        """The first look at an import: its bytes shared with any file that
+        has the same content, then is it a PDF, how many pages, how deep do
+        its bookmarks go. What another file with the same bytes found is taken
+        as it is."""
+        if self.stopping.is_set():
+            return
+        self._adopt(file_id)
         cfg = self.settings.get()
         file = files.get_file(self.store, file_id)
         if file is None or file.deleted or file.state != files.READY:
             return
+        if file.blob:
+            found = files.sibling_pdf(self.store, file.blob, file.id)
+            if found is not None:
+                files.set_pdf_info(self.store, file.id, found[0], found[1], found[2])
+                self.publish(EVENT_FILES)
+                return
         scratch: Path | None = None
         try:
             if file.encrypted:

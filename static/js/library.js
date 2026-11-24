@@ -8,6 +8,12 @@
 // - the server keeps which pieces have arrived. An upload cut off (a closed
 //   tab, a lost connection) is remembered here by name, size and date, and
 //   dropping the same file again sends only what is missing.
+// - before any of that, the file's fingerprint is taken here (SHA-256 of each
+//   8 MiB piece, then of those) and the server asked whether it already holds
+//   that content, anyone's. If it does, it asks for the hash of a few random
+//   ranges, and a right answer gets the file without sending it. Needs
+//   crypto.subtle, which a page over plain http (other than localhost) does
+//   not have: there every file is sent.
 // - once the last piece is in, the server takes a first look (pages,
 //   bookmarks), and says so on the work stream (runs.js), which refreshes the
 //   table.
@@ -226,9 +232,66 @@ const Library = {
     return null;
   },
 
+  // The server's fingerprint (app/models/files.py): SHA-256 over the SHA-256
+  // of each piece in turn. A piece at a time, so memory stays flat.
+  fingerprintPiece: 8 * 1024 * 1024,
+
+  async fingerprint( item ) {
+    const file = item.file;
+    const digests = [];
+    item.checked = 0;
+    for ( let start = 0 ; start < file.size ; start += this.fingerprintPiece ) {
+      if ( this.cancelled ) throw new Error( "cancelled" );
+      const piece = await file.slice( start , start + this.fingerprintPiece ).arrayBuffer();
+      digests.push( new Uint8Array( await crypto.subtle.digest( "SHA-256" , piece ) ) );
+      item.checked = Math.min( start + this.fingerprintPiece , file.size );
+      this.paintItem( item );
+    }
+    const joined = new Uint8Array( digests.length * 32 );
+    digests.forEach( ( digest , index ) => joined.set( digest , index * 32 ) );
+    return this.hex( await crypto.subtle.digest( "SHA-256" , joined ) );
+  },
+
+  hex( buffer ) {
+    return Array.from( new Uint8Array( buffer ) , ( byte ) => byte.toString( 16 ).padStart( 2 , "0" ) ).join( "" );
+  },
+
+  // When the server already has this content: answer its ranges and the
+  // file is ours without sending it. True when that worked; false when the
+  // file has to be sent after all.
+  async claim( item ) {
+    if ( !window.crypto || !crypto.subtle || item.file.size === 0 ) return false;
+    item.state = "checking";
+    this.paintItem( item );
+    const file = item.file;
+    const fingerprint = await this.fingerprint( item );
+    const asked = await Api.claimFile( file.name , file.size , file.type || "application/pdf" , item.folder , fingerprint );
+    if ( !asked.found ) return false;
+    const hashes = [];
+    for ( const range of asked.ranges ) {
+      const bytes = await file.slice( range[ 0 ] , range[ 0 ] + range[ 1 ] ).arrayBuffer();
+      hashes.push( this.hex( await crypto.subtle.digest( "SHA-256" , bytes ) ) );
+    }
+    try {
+      await Api.answerClaim( asked.claim_id , hashes );
+    } catch ( error ) {
+      // Refused (the file changed while it was read, or the claim ran out):
+      // send it.
+      if ( error.status === 403 ) return false;
+      throw error;
+    }
+    item.shared = true;
+    return true;
+  },
+
   async upload( item ) {
     const file = item.file;
     let created = await this.resumable( item );
+    if ( !created && await this.claim( item ) ) return;
+    if ( item.state === "checking" ) {
+      item.state = "sending";
+      this.paintItem( item );
+    }
     if ( created ) {
       item.sent = ( created.chunks - created.missing.length ) * created.chunk_bytes;
     } else {
@@ -312,13 +375,16 @@ const Library = {
   },
 
   paintItem( item ) {
-    item.row.bar.value = item.state === "done" ? item.file.size : item.sent;
-    Dom.show( item.row.bar , item.state === "sending" );
-    const percent = item.file.size ? Math.floor( item.sent * 100 / item.file.size ) : 100;
+    const checking = item.state === "checking";
+    const reached = checking ? ( item.checked || 0 ) : item.sent;
+    item.row.bar.value = item.state === "done" ? item.file.size : reached;
+    Dom.show( item.row.bar , item.state === "sending" || checking );
+    const percent = item.file.size ? Math.floor( reached * 100 / item.file.size ) : 100;
     const words = {
       waiting: I18n.get( "library.state_waiting" ),
+      checking: I18n.get( "library.state_checking" ).replace( "{percent}" , percent ),
       sending: I18n.get( "library.state_sending" ).replace( "{percent}" , percent ).replace( "{size}" , Files.size( item.file.size ) ),
-      done: I18n.get( "library.state_done" ),
+      done: I18n.get( item.shared ? "library.state_shared" : "library.state_done" ),
       failed: I18n.get( "library.state_failed" ).replace( "{reason}" , item.reason || "" ),
       cancelled: I18n.get( "library.state_cancelled" ),
     };
@@ -377,6 +443,7 @@ const Library = {
       const line = all.disk_free_bytes === undefined ? I18n.get( "files.usage_all" ) : I18n.get( "files.usage_all_disk" );
       Dom.text( Dom.get( "files-usage-all" ) , line
         .replace( "{used}" , Files.size( all.used_bytes ) )
+        .replace( "{stored}" , Files.size( all.stored_bytes ) )
         .replace( "{free}" , Files.size( all.disk_free_bytes || 0 ) ) );
     } catch ( error ) { /* the list works without this */ }
     Dom.show( Dom.get( "files-usage-all" ) , this.everyone );

@@ -91,6 +91,9 @@ class User:
     # The keyboard shortcuts this person changed, by action name. See
     # app/models/shortcuts.py.
     shortcuts: dict[str, str] = field(default_factory=dict)
+    # Where this person's tools run: "*" is their default, a tool id its own
+    # override. See app/models/tool_modes.py.
+    tool_modes: dict[str, str] = field(default_factory=dict)
     # This person's own list on the Appearance screen; None follows the app's
     # defaults; themes_builtins is which built-in themes it has seen. theme_id
     # is the one they use. See app/models/themes.py.
@@ -133,6 +136,7 @@ class User:
             "totp_last_step": self.totp_last_step,
             "recovery_hashes": self.recovery_hashes,
             "shortcuts": self.shortcuts,
+            "tool_modes": self.tool_modes,
             "themes": self.themes,
             "themes_builtins": self.themes_builtins,
             "theme_id": self.theme_id,
@@ -153,6 +157,7 @@ class User:
             totp_last_step=record.get("totp_last_step", 0),
             recovery_hashes=record.get("recovery_hashes", []),
             shortcuts=record.get("shortcuts") or {},
+            tool_modes=record.get("tool_modes") or {},
             themes=record.get("themes"),
             themes_builtins=record.get("themes_builtins", 0),
             theme_id=record.get("theme_id", ""),

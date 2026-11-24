@@ -26,6 +26,7 @@ from app.apidocs import ADMIN, PATH, QUERY, SESSION_ONLY, Reply, route
 from app.apidocs import Request as RequestType
 from app.core.config import FILE_CHUNK_BYTES
 from app.core.logs import KIND_ADMIN
+from app.core.runner import EVENT_FILES
 from app.core.security import Guard, actor_from
 from app.models import RestoreError, to_iso
 from app.models import files as models
@@ -178,7 +179,8 @@ DiskBytes = Annotated[int, Meta(description="Left out where the system will not 
 
 
 class AllStorage(Reply, kw_only=True):
-    used_bytes: int
+    used_bytes: Annotated[int, Meta(description="Every account's files added up, the way quotas count them: a file several accounts hold counts for each.")]
+    stored_bytes: Annotated[int, Meta(description="What those files take on disk: content several files share is stored once.")]
     disk_free_bytes: DiskBytes | UnsetType = UNSET
     disk_total_bytes: DiskBytes | UnsetType = UNSET
 
@@ -186,14 +188,15 @@ class AllStorage(Reply, kw_only=True):
 @route(
     "GET /api/admin/storage", summary="Storage for everyone",
     tag="Files", role=ADMIN, feature="files",
-    description="How many bytes everyone's files use together, and the disk's free and total bytes where "
-    "the system says.",
+    description="How many bytes everyone's files use together as quotas count them, what they take on "
+    "disk with shared content stored once, and the disk's free and total bytes where the system says.",
 )
 def all_storage(request: Request) -> AllStorage:
     """Every account's files together, and what room the disk has left, which
     no quota looks at. The disk figures are left out where the system will not
     say. Over HTTP and as the MCP admin_storage tool."""
-    body = AllStorage(used_bytes=models.storage_used(get_store(request)))
+    store = get_store(request)
+    body = AllStorage(used_bytes=models.storage_used(store), stored_bytes=models.disk_used(store))
     try:
         disk = shutil.disk_usage(get_config(request).files.dir)
     except OSError:
@@ -288,6 +291,72 @@ def create_file(request: Request, body: CreateFile) -> FileUpload:
     except (models.FileTooLargeError, models.FileQuotaError) as refusal:
         raise Refused(409, str(refusal)) from None
     return _upload_row(file)
+
+
+class ClaimFile(CreateFile, kw_only=True):
+    fingerprint: Annotated[str, Meta(description="The file's content: SHA-256 over the SHA-256 of each 8 MiB piece of it in turn, as 64 lowercase hex digits.", extra={"error": BAD_FILE})]
+
+
+class ClaimReply(Reply):
+    found: Annotated[bool, Meta(description="Whether the server already has this content. When it does not, upload the file as usual (POST /api/files).")]
+    claim_id: Annotated[str, Meta(description="Where to send the answer. Empty when found is false.")] = ""
+    ranges: Annotated[list[list[int]], Meta(description="[offset, length] pairs: send the SHA-256 of each of these ranges of the file, in hex, in this order. Empty when found is false.")] = []
+
+
+@route(
+    "POST /api/claims", summary="Ask whether the server already has a file",
+    tag="Files", feature="files", errors=(409,),
+    description="Before uploading, say the file's fingerprint. When the server already holds that content "
+    "(anyone's), it asks for the SHA-256 of a few random ranges of the file; a right answer to "
+    "POST /api/claims/{claim_id} adds the file without sending it. The same checks as an upload come "
+    "first: a file over files.max_file_bytes, or one that would pass your quota, is a 409. Ten minutes to answer.",
+)
+def claim_file(request: Request, body: ClaimFile) -> ClaimReply:
+    """The first half of an upload that may not be needed. Over HTTP only:
+    the answer needs the file's bytes, which an MCP client would send anyway."""
+    store, user_id = get_store(request), actor_from(request).user.id
+    try:
+        asked = models.start_claim(
+            store, get_config(request), user_id, body.fingerprint, body.name, body.type, body.size,
+            folder=body.folder, expires_at=retention.expiry_for(store, user_id, models.KIND_IMPORT),
+        )
+    except models.BadFileError as refusal:
+        raise Refused(400, str(refusal)) from None
+    except (models.FileTooLargeError, models.FileQuotaError) as refusal:
+        raise Refused(409, str(refusal)) from None
+    if asked is None:
+        return ClaimReply(found=False)
+    claim_id, ranges = asked
+    return ClaimReply(found=True, claim_id=claim_id, ranges=[[offset, length] for offset, length in ranges])
+
+
+class AnswerClaim(RequestType):
+    claim_id: Annotated[str, PATH, Meta(description="From POST /api/claims.")]
+    hashes: Annotated[list[str], Meta(description="The SHA-256 of each range asked for, in hex, in the same order.")]
+
+
+@route(
+    "POST /api/claims/{claim_id}", summary="Answer a claim",
+    tag="Files", feature="files", status=201, errors=(403, 409),
+    description="The SHA-256 of each range POST /api/claims asked for. Right, and the file is yours, "
+    "ready, without being sent: it shares the bytes the server already has. Wrong, unknown or expired is a "
+    "403, and the file has to be uploaded. A claim is answered once.",
+    reply_description="Created",
+)
+def answer_claim(request: Request, body: AnswerClaim) -> File:
+    store = get_store(request)
+    try:
+        file = models.answer_claim(store, get_config(request), actor_from(request).user.id, body.claim_id, body.hashes)
+    except models.ClaimError as refusal:
+        raise Refused(403, str(refusal)) from None
+    except models.FileQuotaError as refusal:
+        raise Refused(409, str(refusal)) from None
+    if file.pdf_state == models.PDF_PENDING:
+        request.app.state.runner.look_at(file.id)
+    else:
+        request.app.state.runner.publish(EVENT_FILES)
+    audit(request, KIND_ADMIN, "file claimed", {"file_id": file.id, "size": file.size})
+    return _row(file)
 
 
 @route(

@@ -35,7 +35,8 @@ nav:
   view_only: "View only"
   appearance: "Appearance"
   shortcuts: "Shortcuts"
-  library: "Library"
+  tools: "Tools"
+  library: "My files"
   runs: "Runs"
   about: "About"
   admin_heading: "Admin"
@@ -466,7 +467,7 @@ about:
 # The Library screen (static/js/library.js). Placeholders in {braces} are
 # filled in by the page.
 library:
-  heading: "Library"
+  heading: "My files"
   description: "Drop PDFs or whole folders of them here. They are imported at once, and only you and the admins of this app can open them."
   import_heading: "Import"
   drop_title: "Drop PDFs or folders here"
@@ -482,7 +483,11 @@ library:
   speed: " · {rate}/s"
   state_waiting: "Waiting"
   state_sending: "{percent}% of {size}"
+  # Reading the file here to ask the server whether it already has it.
+  state_checking: "Checking {percent}%"
   state_done: "Imported"
+  # The server already had this content: added without sending it.
+  state_shared: "Already on the server"
   state_failed: "Failed: {reason}"
   state_cancelled: "Cancelled"
   list_heading: "Your PDFs"
@@ -519,25 +524,110 @@ split:
   started: "Started {count} splits."
   see_runs: "See runs"
 
-# Split on this device: the Library card that splits with qpdf as WebAssembly,
-# on files that are never uploaded (static/js/local.js).
+# The Tools screen, the home page (static/js/tools.js): every tool, in a row
+# per section. A tool that is not built yet carries the todo badge.
+tools:
+  heading: "Tools"
+  description: "Everything this app can do to a PDF. Open a section to see its tools."
+  todo: "TODO"
+  count: "{count}"
+  open: "Open"
+  back: "All tools"
+  # The badge on each tool: where it runs for you now.
+  where_device: "This device"
+  where_server: "Server"
+  sections:
+    split: "Split"
+    merge: "Merge"
+    convert: "Convert"
+    other: "Other"
+  items:
+    extract_pages:
+      title: "Extract pages"
+      help: "Copy chosen pages into a new PDF."
+    delete_pages:
+      title: "Delete pages"
+      help: "Remove chosen pages from a PDF."
+    split_bookmarks:
+      title: "Split by bookmarks level"
+      help: "One file per bookmark at the level you choose."
+    split_pages:
+      title: "Split by pages"
+      help: "Cut a PDF every so many pages, or at the pages you list."
+    split_size:
+      title: "Split by size"
+      help: "Cut a PDF into files no bigger than a size you set."
+    split_text:
+      title: "Split by text"
+      help: "Start a new file at each page where some text appears."
+    alternate_mix:
+      title: "Alternate mix"
+      help: "Interleave the pages of two PDFs, such as fronts and backs."
+    visual_combine:
+      title: "Visual combine & reorder"
+      help: "Arrange pages from several PDFs by dragging them."
+    merge:
+      title: "Merge"
+      help: "Join several PDFs into one."
+    extract_text:
+      title: "Extract text"
+      help: "Save the text of a PDF as a plain text file."
+    grayscale:
+      title: "Convert to grayscale"
+      help: "Turn every page grey, for printing or smaller files."
+    images_to_pdf:
+      title: "Convert images to PDF"
+      help: "Make one PDF from JPEG and PNG images."
+    compress:
+      title: "Compress"
+      help: "Make a PDF smaller."
+    rotate:
+      title: "Rotate pages"
+      help: "Turn all pages or chosen pages."
+    crop:
+      title: "Crop"
+      help: "Trim the margins of pages."
+    protect:
+      title: "Protect / Encrypt"
+      help: "Add a password and permissions."
+    unprotect:
+      title: "Unprotect / Decrypt"
+      help: "Remove a password you know."
+    repair:
+      title: "Repair"
+      help: "Rewrite a damaged PDF so readers open it."
+
+# The Account card that chooses where tools run (static/js/tool_modes.js).
+tool_modes:
+  heading: "Where your tools run"
+  description: "Tools can run in this browser with WebAssembly, so the PDF is never uploaded, or on the server. Your choice follows you to every device."
+  default_label: "Default for every tool"
+  auto: "Automatic"
+  device: "This device (WebAssembly)"
+  server: "The server"
+  inherit: "Use my default ({mode})"
+  overrides_heading: "Per-tool overrides"
+  overrides_help: "A tool set to its default follows the choice above."
+  overrides_count: "{count} set"
+  table_tool: "Tool"
+  table_section: "Section"
+  table_mode: "Runs on"
+  save: "Save"
+  saved: "Saved where your tools run."
+  reset: "Reset all to Automatic"
+  # Under the default: what Automatic means on the device in hand.
+  unavailable: "Not available for this tool"
+
+# A tool screen's drop zone and the splits it runs on this device with qpdf as
+# WebAssembly (static/js/local.js). auto_device, auto_server, memory and
+# unsupported word what Automatic means here, on Account (js/tool_modes.js);
+# {cores} and {memory} are this device's.
 local:
-  heading: "Split on this device"
-  description: "The PDF never leaves this device: nothing is uploaded, and the sections are saved straight from here. Books of several GB are fine; only one section at a time is held in memory."
-  engine_label: "Where splits run"
-  engine_auto: "Automatic"
-  engine_device: "This device"
-  engine_server: "The server"
-  # What Automatic chose, and why. {cores} and {memory} are this device's.
   auto_device: "Automatic picks this device ({cores} cores{memory})."
   auto_server: "Automatic picks the server: this device has {cores} cores{memory}, and splitting here wants at least 4 cores and 4 GB."
   memory: ", {gb} GB"
-  device_help: "Splits run in this browser."
-  server_help: "PDFs you pick here are imported into your library; split them from the list once they have been read."
   unsupported: "This browser cannot split on this device, so splits run on the server."
-  pick_device: "Split PDFs on this device"
-  pick_server: "Import PDFs to split on the server"
-  imported_for_server: "Importing {count}. Split them from the list once they have been read."
+  imported_for_server: "Importing {count} into My files. Split them from there once they have been read."
   reading: "Reading"
   waiting: "Waiting"
   # {percent} done, on {name}: the section being written.
@@ -549,8 +639,8 @@ local:
   no_bookmarks: "No bookmarks to split at"
   failed: "Failed: {reason}"
   cancelled: "Cancelled"
-  summary_running: "Splitting {done} of {count} on this device"
-  summary_finished: "Split {done} of {count} on this device"
+  summary_running: "Splitting {done} of {count}"
+  summary_finished: "Split {done} of {count}"
   cancel: "Stop"
   download_all: "Download all"
   save_folder: "Save all to a folder"
@@ -639,8 +729,10 @@ files:
   drop_hint: "Or drop files anywhere on this screen."
   usage: "{used} of {quota} used"
   # Under the everyone's files switch. _disk is when the system says what's left.
-  usage_all: "{used} stored across every account."
-  usage_all_disk: "{used} stored across every account, {free} free on disk."
+  # {used} counts a file every account holds once per account, as quotas do;
+  # {stored} is what they take on disk, shared content stored once.
+  usage_all: "{used} across every account, {stored} on disk."
+  usage_all_disk: "{used} across every account, {stored} on disk, {free} free."
   # {names} is who failed, {reason} why the last of them did.
   failed_list: "Not uploaded: {names}. {reason}"
   uploaded: "Files uploaded: {count}"

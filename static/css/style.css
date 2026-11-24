@@ -793,3 +793,13 @@ body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-ins
 .table-check { width: 2.5rem; }
 /* A file name is what people read a row by: it never wraps a letter at a time. */
 .cell-name { min-width: 12rem; }
+
+/* Tools (js/tools.js): a built tool's card is a link that lifts on hover; a
+   tool still to come is muted and cannot be opened. */
+.tool-card { transition: border-color .15s ease, box-shadow .15s ease; }
+a.tool-card:hover, a.tool-card:focus-visible { border-color: var(--bs-primary); box-shadow: var(--bs-box-shadow-sm); }
+.tool-card .tool-icon { color: var(--bs-primary); line-height: 1; }
+.tool-card-todo { opacity: .6; }
+.tool-card-todo .tool-icon { color: var(--bs-secondary-color); }
+.tool-mode-cell { min-width: 11rem; }
+@media (prefers-reduced-motion: reduce) { .tool-card { transition: none; } }

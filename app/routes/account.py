@@ -53,6 +53,7 @@ class Me(Reply, kw_only=True):
     openapi_url: Annotated[str, Meta(description="Where to read this API's reference: config/api.json in app.repo, or /api/api.json when there is no repo.", extra_json_schema={"x-feature": "openapi"})]
     api_doc_url: Annotated[str, Meta(description="Where to read the API reference as a page for people: config/api.md in app.repo, or /docs/api when there is no repo.", extra_json_schema={"x-feature": "openapi"})]
     shortcuts: Annotated[dict[str, str], Meta(description="The keyboard shortcuts you changed, by action. Mod is Cmd on a Mac and Ctrl elsewhere.", extra_json_schema={"x-feature": "shortcuts"})]
+    tool_modes: Annotated[dict[str, str], Meta(description="Where your tools run: \"*\" is your default, and a tool id its own override; each is auto, device or server. Missing: auto, and a tool follows your default.")]
     themes: Annotated[list[Theme] | None, Meta(description="Your themes (see the Theme schema): your own list, else the app's defaults, else null for the built-in ones.", extra_json_schema={"x-feature": "appearance"})]
     themes_custom: Annotated[bool, Meta(description="Whether you have your own list rather than following the defaults.", extra_json_schema={"x-feature": "appearance"})]
     themes_builtins: Annotated[int, Meta(description="Which built-in themes that list has seen (see builtins on POST /api/account/themes).", extra_json_schema={"x-feature": "appearance"})]
@@ -112,6 +113,7 @@ def me(request: Request) -> Me:
         openapi_url=open_api_url(cfg),
         api_doc_url=api_doc_url(cfg),
         shortcuts=actor.user.shortcuts,
+        tool_modes=actor.user.tool_modes,
         themes=theme_list(my_themes),
         themes_custom=themes_custom,
         themes_builtins=themes_builtins,

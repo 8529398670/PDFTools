@@ -79,6 +79,17 @@ def _registry() -> dict[str, Action]:
 
 ACTIONS: dict[str, Action] = _registry()
 
+# Every tool the Tools page lists, built or still to come, in the same order
+# as static/js/tools.js (the catalog with their sections and icons). Only these
+# ids can carry a run-mode override (app/models/tool_modes.py), so an id here
+# is never renamed once shipped, the same as an action's name.
+TOOL_IDS: tuple[str, ...] = (
+    "extract_pages", "delete_pages", "split_bookmarks", "split_pages", "split_size", "split_text",
+    "alternate_mix", "visual_combine", "merge",
+    "extract_text", "grayscale", "images_to_pdf",
+    "compress", "rotate", "crop", "protect", "unprotect", "repair",
+)
+
 
 def parse_options(action: Action, raw: dict[str, Any]) -> msgspec.Struct:
     """The options a person sent, checked. Raises ActionError with words to

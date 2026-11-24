@@ -18,7 +18,7 @@
 // After every change of screen Nav sends a "nav" event on window, which is
 // how a screen hears it was opened (Jobs, Sessions and Logs refresh then).
 const Nav = {
-  fallback: "library",
+  fallback: "tools",
   // Matches Bootstrap's lg breakpoint, where offcanvas-lg becomes a column.
   wide: window.matchMedia( "(min-width: 992px)" ),
   // Collapsed-or-not is a per-browser convenience, like the theme.

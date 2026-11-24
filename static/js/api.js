@@ -108,6 +108,8 @@ const Api = {
   },
   // The whole set of changed keys; {} puts them all back. See shortcuts.js.
   setShortcuts( shortcuts )    { return this.post( "/api/account/shortcuts" , { shortcuts: shortcuts } ); },
+  // The whole set of run modes: "*" and tool ids; {} is Automatic for all. See tool_modes.js.
+  setToolModes( modes )        { return this.post( "/api/account/tool-modes" , { tool_modes: modes } ); },
   // Your whole list of themes (null: back to the defaults), the built-in
   // themes it has seen and the one you use; or only the one you use. See theme.js.
   setThemes( themes , id , builtins ) { return this.post( "/api/account/themes" , { themes: themes , theme_id: id , builtins: builtins || 0 } ); },
@@ -162,6 +164,9 @@ const Api = {
   storage()                    { return this.request( "/api/account/storage" ); },
   allStorage()                 { return this.request( "/api/admin/storage" ); },
   createFile( name , size , type , folder ) { return this.post( "/api/files" , { name: name , size: size , type: type , folder: folder || "" } ); },
+  // Whether the server already has this content; if so, the ranges to hash. See library.js.
+  claimFile( name , size , type , folder , fingerprint ) { return this.post( "/api/claims" , { name: name , size: size , type: type , folder: folder || "" , fingerprint: fingerprint } ); },
+  answerClaim( id , hashes )   { return this.post( "/api/claims/" + encodeURIComponent( id ) , { hashes: hashes } ); },
   file( id )                   { return this.request( "/api/files/" + encodeURIComponent( id ) ); },
   sendFileChunk( id , index , piece ) {
     return this.request( "/api/files/" + encodeURIComponent( id ) + "/chunks/" + index , {
