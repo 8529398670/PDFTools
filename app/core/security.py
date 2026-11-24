@@ -1,0 +1,468 @@
+"""The only place that decides who a request belongs to and whether it is
+allowed to change anything. Route handlers read the answer; they never
+re-derive it. One implementation means one place to get right, and one place
+to look when auditing.
+
+There are two ways to prove who you are, and they meet here rather than
+anywhere downstream: a session cookie (a browser) or an API key in an
+Authorization header (a script, a cron job, another service). Everything past
+this module sees one Actor and one effective role, so a route does not know or
+care which door the request came through.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+from starlette.concurrency import run_in_threadpool
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from app.core import encryption
+from app.core.config import Config
+from app.core.config_live import Holder
+from app.core.db import Store
+from app.core.error_codes import CODE_KEY_MINTING_OFF, CODE_NOT_ADMIN, CODE_NOT_AUTHENTICATED, CODE_NOT_FOUND, CODE_SESSION_ONLY, CODE_VIEW_ONLY, error_body
+from app.models import utc_now
+from app.models.sessions import Session, load_session, touch_session
+from app.models.users import ROLE_ADMIN, ROLE_VIEWER, User, get_owner_id
+
+# Auth method names, as reported by /api/me. Worth exposing so a client can
+# tell a browser session from a key without guessing.
+METHOD_SESSION = "session"
+
+
+@dataclass
+class Actor:
+    """Who a request belongs to, plus how they proved it.
+
+    role is the *effective* role, not the account's: a user-scoped API key
+    held by an admin authenticates as a user. Every permission check reads
+    this field, so the narrowing cannot be forgotten at a call site."""
+
+    user: User
+    role: str
+    session: Session | None = None
+    # This request moved the session's end, so the response carries the cookie
+    # again. See LoadActor.
+    session_extended: bool = False
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == ROLE_ADMIN
+
+    @property
+    def is_viewer(self) -> bool:
+        """Looks and changes nothing: see ViewOnly."""
+        return self.role == ROLE_VIEWER
+
+    @property
+    def via_api_key(self) -> bool:
+        """Distinguishes the two doors. It decides the CSRF question below, and
+        it is what an endpoint reads if it genuinely must be browser-only."""
+        return False
+
+    @property
+    def key_id(self) -> str:
+        """The id of the API key this request came with, or "" for a browser
+        session. A login link or invite link a key makes records it, so
+        revoking the key voids them (see login_tokens.void_links_minted_by_key)."""
+        return ""
+
+    @property
+    def lineage_key(self) -> str:
+        """The key whatever this request makes is answerable to: the calling
+        key, or for a browser session that a key's login link opened, that key
+        (Session.minted_by_key). Every key, login link and invite link a
+        request makes records it, so revoking the key -- or its expiry, for a
+        key -- ends what it made through a session too. key_id stays the
+        calling key alone, for what only a key does to itself (rotating)."""
+        if self.key_id:
+            return self.key_id
+        return self.session.minted_by_key if self.session is not None else ""
+
+    @property
+    def key_born(self) -> bool:
+        """True for a browser session a key's login link opened. It may do
+        what any session does, except what would hand out a way in that
+        nothing ties to the key: a password, a PIN, two-factor, or a fresh
+        secret for another key. Those need a session the person signed in to
+        themselves."""
+        return not self.key_id and self.session is not None and bool(self.session.minted_by_key)
+
+    @property
+    def method(self) -> str:
+        return METHOD_SESSION
+
+
+# ---------------------------------------------------------------------------
+# the session cookie
+# ---------------------------------------------------------------------------
+
+
+def set_session_cookie(response: Response, cfg: Config, credential: str) -> None:
+    """Store the session credential encrypted with the server key. The server
+    already checks the credential against the database, so the encryption is
+    not what makes the session unforgeable -- it means the cookie is opaque to
+    anyone reading it out of a browser profile or a proxy log, and that a
+    tampered cookie fails to decrypt instead of reaching the lookup."""
+    _write_session_cookie(response, cfg, encryption.xchacha_encrypt_string(encryption.subkey(cfg.secret_key, encryption.PURPOSE_COOKIE), credential), cfg.session_ttl_seconds)
+
+
+def _write_session_cookie(response: Response, cfg: Config, sealed: str, max_age: int) -> None:
+    """The one place the cookie's attributes are spelled, so the copy sent when
+    a session extends cannot drift from the one sent at sign-in."""
+    response.set_cookie(
+        cfg.session_cookie_name,
+        sealed,
+        max_age=max_age,
+        path="/",
+        secure=cfg.secure_cookies,
+        httponly=True,
+        samesite="strict",
+    )
+
+
+def clear_session_cookie(response: Response, cfg: Config) -> None:
+    response.delete_cookie(cfg.session_cookie_name, path="/", secure=cfg.secure_cookies, httponly=True, samesite="strict")
+    if cfg.secure_cookies:
+        # A cookie from before the __Host- prefix goes too.
+        response.delete_cookie(cfg.cookie_name, path="/", secure=True, httponly=True, samesite="strict")
+
+
+def decrypt_cookie(cfg: Config, raw: str) -> str:
+    """Turn the stored cookie back into a session credential. Exposed because
+    logging out has to destroy the server-side record, not just drop the
+    cookie -- otherwise a copy of the cookie taken earlier still works.
+    Raises encryption.CipherTextError for anything that is not ours."""
+    return encryption.xchacha_decrypt_string(encryption.subkey(cfg.secret_key, encryption.PURPOSE_COOKIE), raw)
+
+
+# ---------------------------------------------------------------------------
+# resolving the caller
+# ---------------------------------------------------------------------------
+
+
+def _resolve_session(store: Store, cfg: Config, cookies: dict[str, str]) -> Actor | None:
+    raw = cookies.get(cfg.session_cookie_name, "")
+    if raw == "":
+        return None
+    try:
+        credential = decrypt_cookie(cfg, raw)
+    except (encryption.CipherTextError, encryption.BadKeyError):
+        return None
+    loaded = load_session(store, credential)
+    if loaded is None:
+        return None
+    session, user = loaded
+    extended = touch_session(store, session, cfg.session_ttl_seconds, cfg.session_max_age_seconds)
+    return Actor(user=user, role=user.role, session=session, session_extended=extended)
+
+
+def resolve_actor(store: Store, cfg: Config, cookies: dict[str, str], authorization: str) -> Actor | None:
+    """An Authorization: Bearer header decides it: the request is that key or
+    no one, and the cookie is not read. Otherwise the cookie. A script using
+    a narrow key must not quietly run as the full account whose cookie
+    happens to be in the jar, and a bad key is no one, not the cookie.
+
+    The CSRF rule below stays sound: a header is never ambient -- a page on
+    another site cannot add one without a CORS preflight this server does not
+    answer -- and a request that skips the token check by carrying a key
+    needed that key to begin with."""
+    return _resolve_session(store, cfg, cookies)
+
+
+class LoadActor:
+    """Runs on every request. It resolves the caller once and stashes the
+    result on request.state, so a handler and a guard asking "who is this" do
+    not cost two database reads. It never rejects anything -- that is the
+    guards' job -- because plenty of routes are fine for anonymous visitors.
+
+    The lookup touches SQLite, so it runs in a worker thread rather than on
+    the event loop.
+
+    It reads the running configuration per request: whether API keys are
+    believed at all (auth.api_keys) can change while the server runs."""
+
+    def __init__(self, app: ASGIApp, store: Store, settings: Holder) -> None:
+        self.app = app
+        self.store = store
+        self.settings = settings
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            request = Request(scope)
+            actor = await run_in_threadpool(
+                resolve_actor, self.store, self.settings.get(), dict(request.cookies), request.headers.get("authorization", "")
+            )
+            request.state.actor = actor
+            if actor is not None and actor.session_extended:
+                send = self._sending_cookie(send, request.cookies[self.settings.get().session_cookie_name], actor.session)
+        await self.app(scope, receive, send)
+
+    def _sending_cookie(self, send: Send, sealed: str, session: Session) -> Send:
+        """The browser drops the cookie at its own expiry, so extending only
+        the record would still sign this person out when that arrived. Unless
+        the route set the cookie itself: logging out or switching account on
+        the request that extended has to win, and two headers for one cookie
+        would leave the answer to their order."""
+        cfg = self.settings.get()
+        carrier = Response()
+        _write_session_cookie(carrier, cfg, sealed, int((session.expires_at - utc_now()).total_seconds()))
+        header = next(item for item in carrier.raw_headers if item[0] == b"set-cookie")
+        name = cfg.session_cookie_name.encode("latin-1") + b"="
+
+        async def send_with_cookie(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                if not any(key.lower() == b"set-cookie" and value.startswith(name) for key, value in headers):
+                    headers.append(header)
+                message["headers"] = headers
+            await send(message)
+
+        return send_with_cookie
+
+
+def actor_from(request: Request) -> Actor | None:
+    return getattr(request.state, "actor", None)
+
+
+# ---------------------------------------------------------------------------
+# guards
+#
+# RequireLogin, RequireAdmin, RequireSession and RequireAPIKey are middleware
+# attached to routes where they are registered (app/routes/__init__.py), rather than
+# helpers called at the top of each handler, so a new protected route is
+# protected by where it is registered -- forgetting the check is not something
+# you can do silently.
+# ---------------------------------------------------------------------------
+
+
+def _refuse(status: int, message: str, code: str = "") -> JSONResponse:
+    return JSONResponse(error_body(status, message, code), status_code=status)
+
+
+class Guard:
+    """Base for the guards: subclasses return a refusal, or None to let the
+    request through."""
+
+    # The error statuses it can answer with, for the API docs.
+    statuses: tuple[int, ...] = ()
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    def refuse(self, request: Request) -> Response | None:  # pragma: no cover - overridden
+        raise NotImplementedError
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        refusal = self.refuse(Request(scope))
+        if refusal is not None:
+            await refusal(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
+class RequireLogin(Guard):
+    statuses = (401,)
+
+    def refuse(self, request: Request) -> Response | None:
+        if actor_from(request) is None:
+            return _refuse(401, "not authenticated", CODE_NOT_AUTHENTICATED)
+        return None
+
+
+class RequireAdmin(Guard):
+    statuses = (401, 403)
+
+    def refuse(self, request: Request) -> Response | None:
+        actor = actor_from(request)
+        if actor is None:
+            return _refuse(401, "not authenticated", CODE_NOT_AUTHENTICATED)
+        if not actor.is_admin:
+            return _refuse(403, "forbidden", CODE_NOT_ADMIN)
+        return None
+
+
+class RequireSession(Guard):
+    """Refuses a request that authenticated with an API key, even a correctly
+    scoped one. It guards what a key must not reach (see
+    app/routes/__init__.py): minting, renaming and revoking API keys, your own
+    password, PIN and two-factor, other people's files, and the owner's
+    screens.
+
+    Accounts and ways in are not on that list. An admin key may create and
+    delete accounts, change roles and hand out login links and invite links.
+    A key makes its own account a login link only once that account switched
+    it on from a session (APIKey.may_sign_in), and then one that works once,
+    for at most 15 minutes. What keeps revoking a leaked key meaningful is
+    that every link records the key that made it, and revoking or deleting
+    the key voids those still usable and ends every session one of its login
+    links signed in (login_tokens.void_links_minted_by_key). Disabling or
+    demoting the key's account does the same for all its keys. What it does
+    not undo is anything such a session did meanwhile, or the accounts made
+    through an invite link it handed out: those show in the activity log and
+    the user list.
+
+    Keys themselves stay browser-only, with one exception kept on a short
+    leash. A key that could mint a key freely would leave a successor behind
+    with nothing to tie it to the one revoked. So only the owner may let a
+    key mint, from a browser session, and only one of the owner's own admin
+    keys that was not minted itself (APIKey.may_mint_keys, RequireKeyMinting
+    below). Every key it mints records it (minted_by_key), can never mint or
+    make sign-in links in turn, and is revoked with it: revoking or deleting
+    a key revokes every key below it, down the whole chain
+    (api_keys.revoke_minted_tx), and voids what each of them made. Revoking
+    the minting key is still the one switch that ends it all."""
+
+    statuses = (401, 403)
+
+    def refuse(self, request: Request) -> Response | None:
+        actor = actor_from(request)
+        if actor is None:
+            return _refuse(401, "not authenticated", CODE_NOT_AUTHENTICATED)
+        if actor.via_api_key:
+            return _refuse(403, "this endpoint requires a signed-in session, not an API key", CODE_SESSION_ONLY)
+        return None
+
+
+# What a viewer may still send besides reads: signing out, ending its own
+# sessions, and cancelling its own login link -- each only takes a way in
+# away. /mcp is let through because a viewer key reads through it, and MCP
+# hides every tool that is not a read from a viewer (Tool.visible_to). The
+# public sign-in routes are let through because they do not act as the
+# signed-in account at all: opening a login link for another account in a
+# browser a viewer is signed in on has to work.
+VIEW_ONLY_ALLOWED = re.compile(
+    r"^/(?:api/logout|api/account/login-link/cancel|api/account/sessions/revoke-others"
+    r"|api/account/sessions/[^/]+/revoke|mcp|api/login(?:/[^/]+)?|api/join/[^/]+"
+    # A key rotating its own secret takes the old one away (portal contract v3).
+    r"|api/keys/self/rotate)$"
+)
+
+
+def viewer_may_call(route: str) -> bool:
+    """Whether a viewer may call a route, given as "METHOD /path" (a real
+    path or a route's template). ViewOnly asks it of every request, and MCP of
+    every tool (Tool.visible_to), so the two cannot disagree."""
+    method, _, path = route.partition(" ")
+    return method in ("GET", "HEAD", "OPTIONS") or VIEW_ONLY_ALLOWED.match(path) is not None
+
+
+class ViewOnly:
+    """The viewer role's one rule, for every route at once: a viewer's
+    session or key may read (GET and HEAD) and nothing else, bar
+    VIEW_ONLY_ALLOWED. Anything else answers 403 {"error": "view_only", "code": "view_only"} before
+    a handler runs.
+
+    Middleware right after LoadActor rather than a guard on each route, so a
+    route an app adds later is covered without anyone remembering to: the
+    role is read off the actor, so a viewer account's admin key and a
+    viewer-scoped key are both held to it."""
+
+    statuses = (403,)
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            actor = actor_from(Request(scope))
+            if actor is not None and actor.is_viewer and not viewer_may_call(f"{scope['method']} {scope['path']}"):
+                await _refuse(403, "view_only", CODE_VIEW_ONLY)(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+class RequireOwner(Guard):
+    """Lets through only the owner, signed in from a browser. It guards the
+    activity log (app/routes/logs.py), which shows what every account did --
+    including the other admins, which is exactly why they cannot read it.
+    Everyone else, any API key included, gets the 404 an unknown route gets:
+    the Logs screen is not something to advertise.
+
+    A session, not a key: the log holds every account's IP addresses and
+    activity, and a key is a credential that lives in files. An app that
+    wants the log readable by a script should add a narrow export,
+    knowingly.
+
+    Finding the owner reads SQLite, so unlike the guards above this one runs
+    its check in a worker thread."""
+
+    statuses = (404,)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        request = Request(scope)
+        actor = actor_from(request)
+        allowed = actor is not None and not actor.via_api_key and actor.is_admin
+        if allowed:
+            owner_id = await run_in_threadpool(get_owner_id, request.app.state.store)
+            allowed = owner_id is not None and owner_id == actor.user.id
+        if not allowed:
+            await _refuse(404, "not_found", CODE_NOT_FOUND)(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
+def still_owner(store: Store, credential: str) -> bool:
+    """Whether a session is still the owner's, for something that outlives the
+    request that was let in: an open stream, which RequireOwner checked once.
+    Straight to load_session, not through resolve_actor: it must not touch
+    last_seen_at, since a stream staying open is not the person being there,
+    and an API key has no business answering for a session that ended."""
+    loaded = load_session(store, credential)
+    if loaded is None:
+        return False
+    _, user = loaded
+    return user.role == ROLE_ADMIN and get_owner_id(store) == user.id
+
+
+def log_actor(actor: Actor | None) -> dict:
+    """Who an activity-log entry belongs to: the account, the role it acted
+    with, and which door it came through (a key by its public id only)."""
+    if actor is None:
+        return {"method": "anon"}
+    result = {"user_id": actor.user.id, "name": actor.user.display_name, "role": actor.role, "method": actor.method}
+    return result
+
+
+def actor_fields(actor: dict[str, Any]) -> dict[str, Any] | None:
+    """Who acted, as an admin entry's detail and a webhook's actor carry it
+    (portal contract v3): actor_user_id, actor_name, and for a key,
+    actor_key_id and actor_key_name. None for nobody."""
+    if not actor.get("user_id"):
+        return None
+    fields: dict[str, Any] = {"actor_user_id": actor["user_id"], "actor_name": actor.get("name", "")}
+    if actor.get("key_id"):
+        fields["actor_key_id"] = actor["key_id"]
+        fields["actor_key_name"] = actor.get("key_name", "")
+    return fields
+
+
+# ---------------------------------------------------------------------------
+# CSRF
+# ---------------------------------------------------------------------------
+
+
+def check_csrf(request: Request, submitted: object) -> bool:
+    """Guards state-changing requests. SameSite=Strict already blocks the
+    common cross-site POST, but it is a browser-side promise: older browsers,
+    odd cross-scheme cases, and non-browser clients do not all honour it. A
+    per-session token echoed back in the JSON body costs nothing and does not
+    depend on the browser behaving.
+
+    A request authenticated by an API key is exempt, and that is not a hole.
+    CSRF exists because a cookie is *ambient* -- the browser attaches it to a
+    request some other site caused. Nothing attaches an Authorization header
+    on its own; a forged cross-site request from an attacker's page carries no
+    key, so there is nothing to forge with. Requiring a token here would
+    instead mean every script had to fetch one first, for no gain."""
+    actor = actor_from(request)
+    if actor is None:
+        return False
+    if actor.via_api_key:
+        return True
+    if actor.session is None or not isinstance(submitted, str) or submitted == "":
+        return False
+    return encryption.constant_time_equal(actor.session.csrf_token, submitted)

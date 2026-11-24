@@ -1,0 +1,383 @@
+"""User accounts, and the owner.
+
+Links are the way in. A password is optional and off by default (see
+app/models/passwords.py): an account gets one only by signing in with a link
+first, so there is no signup, and the owner decides whether passwords work at
+all. See references/architecture.md.
+
+The owner is the one admin who outranks the others. It exists for a single
+decision the admin role cannot settle by itself: who may permanently delete
+an admin. Without it, any admin can delete any other, and the last one to act
+wins.
+
+It is recorded as one id in the meta bucket rather than as a role beside
+admin and user. Roles are also what API keys carry and what narrow_role
+compares, so a third one would spread into key scoping, role validation, and
+every role check in the app -- all to express something that only matters to
+a few account-management routes. As a marker, the owner is an ordinary admin
+everywhere else.
+
+The invariant: the owner is always an existing, enabled admin, or there is no
+owner because there are no admins. Every path keeps it -- the first admin
+created becomes the owner (create_user), nothing may delete or disable the
+owner (app/models/credentials.py), and ownership only moves to another
+enabled admin (transfer_owner). That is also why the first-run bootstrap
+never fires again once an owner exists.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from dataclasses import field
+from datetime import datetime
+from typing import Any
+
+from app.core.db import BUCKET_META, BUCKET_USERS, Record, Store, Transaction
+from app.models import from_iso, to_iso, utc_now
+
+ROLE_ADMIN = "admin"
+ROLE_USER = "user"
+# Sees what a user sees and changes nothing: the global guard in
+# app/core/security.py (ViewOnly) answers 403 view_only to anything but a
+# read. Ranked below user, so a key or a link can always narrow to it.
+ROLE_VIEWER = "viewer"
+
+# Lowest first. narrow_role and every "may not outrank" check compare these.
+ROLE_RANK = {ROLE_VIEWER: 0, ROLE_USER: 1, ROLE_ADMIN: 2}
+
+META_OWNER_KEY = "owner_user_id"
+
+# An account's kind. A person signs in; a service account (ProjectPortal's
+# own, see app/models/portal.py) only ever has API keys. Records written
+# before kinds existed have none, and read as a person.
+KIND_PERSON = "person"
+KIND_SERVICE = "service"
+
+
+class ServiceAccountError(Exception):
+    """Refusal for a way in, or the owner's seat, for a service account
+    (KIND_SERVICE): it has API keys only, and is never signed into."""
+
+    def __init__(self) -> None:
+        super().__init__("a service account has API keys only, and is never signed into")
+
+
+class NotAdminError(Exception):
+    """Refusal for making a non-admin, or a disabled admin, the owner."""
+
+    def __init__(self) -> None:
+        super().__init__("the owner must be an enabled admin")
+
+
+@dataclass
+class User:
+    id: int
+    display_name: str
+    role: str
+    created_at: datetime
+    disabled_at: datetime | None = None
+    # When the account stops working, or None for never. Past it the account
+    # counts as disabled everywhere (see disabled), and housekeeping disables
+    # it for good and revokes its access (credentials.expire_due_accounts).
+    expires_at: datetime | None = None
+    # KIND_PERSON or KIND_SERVICE.
+    kind: str = KIND_PERSON
+    # TOTP secrets are encrypted here as well as with the record, because
+    # server.encrypt_at_rest can be off and a secret cannot be hashed. See
+    # app/models/two_factor.py.
+    totp_secret: str = ""
+    totp_pending: str = ""
+    totp_last_step: int = 0
+    recovery_hashes: list[str] = field(default_factory=list)
+    # The keyboard shortcuts this person changed, by action name. See
+    # app/models/shortcuts.py.
+    shortcuts: dict[str, str] = field(default_factory=dict)
+    # This person's own list on the Appearance screen; None follows the app's
+    # defaults; themes_builtins is which built-in themes it has seen. theme_id
+    # is the one they use. See app/models/themes.py.
+    themes: list[dict[str, Any]] | None = None
+    themes_builtins: int = 0
+    theme_id: str = ""
+
+    @property
+    def expired(self) -> bool:
+        return self.expires_at is not None and utc_now() >= self.expires_at
+
+    @property
+    def disabled(self) -> bool:
+        """Switched off, or past its expiry. Every check that refuses a
+        disabled account -- sessions, keys, login links, passwords -- reads
+        this, so an expired account is refused the moment it expires, not
+        when housekeeping next runs."""
+        return self.disabled_at is not None or self.expired
+
+    @property
+    def is_service(self) -> bool:
+        """A service account: keys only, never signed into."""
+        return self.kind == KIND_SERVICE
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == ROLE_ADMIN
+
+    def to_record(self) -> Record:
+        return {
+            "id": self.id,
+            "display_name": self.display_name,
+            "role": self.role,
+            "created_at": to_iso(self.created_at),
+            "disabled_at": to_iso(self.disabled_at),
+            "expires_at": to_iso(self.expires_at),
+            "kind": self.kind,
+            "totp_secret": self.totp_secret,
+            "totp_pending": self.totp_pending,
+            "totp_last_step": self.totp_last_step,
+            "recovery_hashes": self.recovery_hashes,
+            "shortcuts": self.shortcuts,
+            "themes": self.themes,
+            "themes_builtins": self.themes_builtins,
+            "theme_id": self.theme_id,
+        }
+
+    @classmethod
+    def from_record(cls, record: Record) -> "User":
+        return cls(
+            id=record["id"],
+            display_name=record["display_name"],
+            role=record["role"],
+            created_at=from_iso(record["created_at"]),
+            disabled_at=from_iso(record.get("disabled_at")),
+            expires_at=from_iso(record.get("expires_at")),
+            kind=record.get("kind") or KIND_PERSON,
+            totp_secret=record.get("totp_secret", ""),
+            totp_pending=record.get("totp_pending", ""),
+            totp_last_step=record.get("totp_last_step", 0),
+            recovery_hashes=record.get("recovery_hashes", []),
+            shortcuts=record.get("shortcuts") or {},
+            themes=record.get("themes"),
+            themes_builtins=record.get("themes_builtins", 0),
+            theme_id=record.get("theme_id", ""),
+        )
+
+
+def valid_role(role: str) -> bool:
+    return role in ROLE_RANK
+
+
+def role_rank(role: str) -> int:
+    """Where a role sits, viewer lowest. Anything unknown ranks as viewer, so
+    a bad value can only ever narrow."""
+    return ROLE_RANK.get(role, 0)
+
+
+def lower_role(first: str, second: str) -> str:
+    """The lower of two roles: the ceiling a key or a minted key gets."""
+    return first if role_rank(first) <= role_rank(second) else second
+
+
+def valid_display_name(display_name: str) -> bool:
+    """Bounds the one piece of free text a user controls. The cap is about
+    keeping the database and the UI sane; escaping for display is the
+    frontend's job (static/js/dom.js never uses innerHTML for user values)."""
+    return isinstance(display_name, str) and 1 <= len(display_name.strip()) <= 80
+
+
+def create_user(store: Store, display_name: str, role: str, expires_at: datetime | None = None) -> User:
+    """Store a new account. The first admin ever created -- by the first-run
+    bootstrap or `manage bootstrap-admin` -- also becomes the owner, in the
+    same transaction, so there is no moment where admins exist and no owner
+    does.
+
+    Ids come from the bucket's sequence and are never reused, so a deleted
+    account's id can never come back as a different person."""
+    with store.transaction() as tx:
+        return create_user_tx(tx, display_name, role, expires_at)
+
+
+def create_user_tx(tx: Transaction, display_name: str, role: str, expires_at: datetime | None = None) -> User:
+    """create_user inside the caller's transaction, for an account that has to
+    be created together with something else -- joining through an invite link
+    creates the account, takes a place on the link, and starts the session
+    all at once."""
+    if not valid_role(role):
+        raise ValueError(f"invalid role: {role!r}")
+    user = User(
+        id=tx.next_sequence(BUCKET_USERS),
+        display_name=display_name.strip(),
+        role=role,
+        created_at=utc_now(),
+        expires_at=expires_at,
+    )
+    if role == ROLE_ADMIN and owner_id_tx(tx) is None:
+        # The owner never expires.
+        user.expires_at = None
+        _set_owner_tx(tx, user.id)
+    tx.put(BUCKET_USERS, user.id, user.to_record())
+    return user
+
+
+def get_user(store: Store, user_id: int) -> User | None:
+    record = store.get(BUCKET_USERS, user_id)
+    return None if record is None else User.from_record(record)
+
+
+def list_users(store: Store) -> list[User]:
+    return [User.from_record(record) for _, record in store.all(BUCKET_USERS)]
+
+
+class RenameConflictError(Exception):
+    """The name was not what the caller expected: someone changed it since.
+    current is the name it has now."""
+
+    def __init__(self, current: str) -> None:
+        super().__init__("the name was changed somewhere else in the meantime")
+        self.current = current
+
+
+def rename_user(store: Store, user_id: int, display_name: str, expect: str | None = None) -> bool:
+    """Goes through update_value rather than get_user followed by a put. The
+    read and the write land in one transaction, which is what stops two
+    concurrent admin requests from each reading the old row and the slower one
+    silently discarding the other's change.
+
+    Disabling an account is not here: it has to take the account's sessions
+    and login links with it in the same transaction, so it lives in
+    app/models/credentials.py beside the other operations that span
+    buckets.
+
+    expect, when given, is the name the caller believes is stored, checked
+    in the same transaction: RenameConflictError if it is not. It is what
+    makes an undo of a rename safe -- putting the old name back must not
+    overwrite one somebody chose in another tab since."""
+
+    def mutate(record: Record) -> None:
+        if expect is not None and record["display_name"] != expect.strip():
+            raise RenameConflictError(record["display_name"])
+        record["display_name"] = display_name.strip()
+
+    return store.update_value(BUCKET_USERS, user_id, mutate) is not None
+
+
+def any_admin_exists(store: Store) -> bool:
+    """Decides whether the server prints a first-run login link on boot. Once
+    one enabled admin exists, that bootstrap path stays closed."""
+    return any(user.is_admin and not user.disabled for user in list_users(store))
+
+
+def owner_id_tx(tx: Transaction) -> int | None:
+    """The owner's id inside the caller's transaction, or None."""
+    record = tx.get(BUCKET_META, META_OWNER_KEY)
+    return None if record is None else record["user_id"]
+
+
+class OwnerProtectedError(Exception):
+    """Refusal for acting on the owner: deleting, disabling, revoking, or
+    (from the web) anything else may_act_on_tx guards. Move ownership first:
+    manage transfer-owner."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "the owner account cannot be deleted, disabled, or have its access revoked "
+            "-- transfer ownership first (manage transfer-owner)"
+        )
+
+
+class OwnerRequiredError(Exception):
+    """Refusal for an admin who is not the owner acting on another admin."""
+
+    def __init__(self) -> None:
+        super().__init__("only the owner can do this to an admin account")
+
+
+def may_act_on_tx(tx: Transaction, actor_id: int | None, target: User | dict | None) -> None:
+    """The one rule for an admin acting on someone else's account, read
+    inside the caller's transaction so ownership cannot move between the
+    check and the change:
+
+    - nobody acts on the owner (OwnerProtectedError);
+    - only the owner acts on another admin (OwnerRequiredError).
+
+    An actor_id of None is the operator, through the CLI, and acting on your
+    own account is your own business; neither is refused here. A route that
+    also refuses acting on yourself (deleting, changing your own role) checks
+    that first, with its own error. A missing target passes: the caller
+    answers "no such user" itself.
+
+    Every route that changes another account goes through this -- deleting,
+    role, 2FA reset, login links, disabling, revoking, ending sessions, and
+    minting, revoking, deleting or restoring an API key for someone else -- so
+    the rule cannot be forgotten on one door and kept on the others."""
+    if target is None or actor_id is None:
+        return
+    user = target if isinstance(target, User) else User.from_record(target)
+    if actor_id == user.id:
+        return
+    owner_id = owner_id_tx(tx)
+    if user.id == owner_id:
+        raise OwnerProtectedError()
+    if user.is_admin and actor_id != owner_id:
+        raise OwnerRequiredError()
+
+
+def may_act_on_id_tx(tx: Transaction, actor_id: int | None, user_id: int) -> None:
+    """may_act_on_tx for a caller holding only the target's id."""
+    if actor_id is None or actor_id == user_id:
+        return
+    may_act_on_tx(tx, actor_id, tx.get(BUCKET_USERS, user_id))
+
+
+def may_act_on(store: Store, actor_id: int | None, user_id: int) -> None:
+    """may_act_on_tx in its own transaction, for a route that must refuse
+    before it does anything else. Where the change is a write, check inside
+    it instead."""
+    with store.transaction() as tx:
+        may_act_on_id_tx(tx, actor_id, user_id)
+
+
+def _set_owner_tx(tx: Transaction, user_id: int) -> None:
+    tx.put(BUCKET_META, META_OWNER_KEY, {"user_id": user_id})
+
+
+def get_owner_id(store: Store) -> int | None:
+    record = store.get(BUCKET_META, META_OWNER_KEY)
+    return None if record is None else record["user_id"]
+
+
+def ensure_owner(store: Store) -> int | None:
+    """Adopt an owner for a database that predates the marker: the lowest-id
+    enabled admin, which on any database that started from the first-run
+    bootstrap is the account that bootstrap created. A no-op once an owner is
+    recorded, so it is safe to call on every boot."""
+    with store.transaction() as tx:
+        owner_id = owner_id_tx(tx)
+        if owner_id is not None:
+            return owner_id
+        for _key, record in tx.all(BUCKET_USERS):  # key order is id order
+            user = User.from_record(record)
+            if user.is_admin and not user.disabled:
+                _set_owner_tx(tx, user.id)
+                return user.id
+    return None
+
+
+def transfer_owner(store: Store, user_id: int) -> User | None:
+    """Hand ownership to another enabled admin; None if there is no such user.
+
+    Reachable only from the CLI: ownership is the one thing the web UI cannot
+    change about itself, so a compromised admin session cannot promote itself
+    past the other admins."""
+    with store.transaction() as tx:
+        record = tx.get(BUCKET_USERS, user_id)
+        if record is None:
+            return None
+        user = User.from_record(record)
+        if user.is_service:
+            raise ServiceAccountError()
+        if not user.is_admin or user.disabled:
+            raise NotAdminError()
+        # The owner never expires: an expiry set while it was an ordinary
+        # admin goes with the promotion.
+        if user.expires_at is not None:
+            user.expires_at = None
+            tx.put(BUCKET_USERS, user_id, user.to_record())
+        _set_owner_tx(tx, user_id)
+    return user

@@ -1,0 +1,10 @@
+# Written by the skill that scaffolded this app; `webserver-upgrade` reads and
+# updates it. Commit it: it is how an update knows where this app started.
+skill: python-webserver
+commit: 13377794684472d1495e0062b5ffd90f807616bd
+project_name: "PDFTools"
+slug: pdftools
+port: 27079
+features: [files, two_factor]
+pruned: [api_keys, backups, invite_links, mcp, metrics, passwords, webhooks]
+tests: false
