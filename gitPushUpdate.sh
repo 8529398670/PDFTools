@@ -41,4 +41,5 @@ else
 	git remote add origin "$Remote"
 fi
 git push origin --tags --force
-git push origin main
+# Whichever of master or main this repo uses.
+git push origin "$(git branch --show-current)"
