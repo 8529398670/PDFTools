@@ -28,6 +28,7 @@ from app.core import assets, db, encryption, language
 from app.core.static_files import StaticServer
 from app.main import build_app
 from app.models import login_tokens, users
+from app.models import api_keys
 from app.models.sign_in import SignInRules
 from app.tests.support import new_holder
 
@@ -63,6 +64,8 @@ class RoutesTestCase(unittest.TestCase):
         users.ensure_owner(self.store)
         self.admin = users.create_user(self.store, "Other admin", users.ROLE_ADMIN)
         self.user = users.create_user(self.store, "User", users.ROLE_USER)
+        self.admin_key, _ = api_keys.issue_api_key(self.store, self.owner.id, "admin", users.ROLE_ADMIN, 3600)
+        self.user_key, _ = api_keys.issue_api_key(self.store, self.owner.id, "user", users.ROLE_USER, 3600)
 
         bundle = assets.resolve(cfg.static_dir, cfg.language_file)
         self.app = build_app(self.holder, self.store, language.parse(bundle.language_yaml), StaticServer(bundle.static_dir))

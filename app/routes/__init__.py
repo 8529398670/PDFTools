@@ -45,12 +45,14 @@ from app.routes import (
     account,
     admin,
     api_docs_md,
+    api_keys,
     auth,
     files,
     jobs,
     logs,
     meta,
     openapi,
+    portal,
     retention,
     runs,
     sessions,
@@ -61,6 +63,7 @@ from app.routes import (
     tool_modes,
     two_factor,
 )
+from app.routes.api_keys import RequireAPIKeys
 from app.routes.files import RequireFiles
 from app.routes.helpers import get_config
 from app.routes.helpers import not_found
@@ -92,12 +95,14 @@ MODULES = [
     account,
     admin,
     api_docs_md,
+    api_keys,
     auth,
     files,
     jobs,
     logs,
     meta,
     openapi,
+    portal,
     retention,
     runs,
     sessions,
@@ -116,6 +121,7 @@ MODULES = [
 FEATURE_GUARDS: dict[str, type[Guard]] = {
     "two_factor": RequireTwoFactor,
     "files": RequireFiles,
+    "api_keys": RequireAPIKeys,
     "logs": RequireLogs,
 }
 

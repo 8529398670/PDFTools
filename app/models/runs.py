@@ -146,6 +146,26 @@ def update(store: Store, run_id: str, **changes: Any) -> Run | None:
     return None if record is None else Run.from_record(record)
 
 
+RESTARTABLE = (CANCELLED, FAILED)
+
+
+def restart_run(store: Store, run_id: str) -> Run | None:
+    """A cancelled or failed run, queued again from the beginning with the
+    same file and options. What it had made went to the bin when it stopped.
+    Answers None when the run is not one that can start again."""
+    restarted = False
+
+    def mutate(record: Record) -> None:
+        nonlocal restarted
+        if record.get("deleted_at") is not None or record.get("state") not in RESTARTABLE:
+            return
+        restarted = True
+        record.update(state=QUEUED, progress=0.0, message="", step="", result={}, started_at=None, finished_at=None, outputs=[])
+
+    record = store.update_value(BUCKET_RUNS, run_id, mutate)
+    return Run.from_record(record) if record is not None and restarted else None
+
+
 def add_output(store: Store, run_id: str, file_id: str) -> None:
     def mutate(record: Record) -> None:
         record.setdefault("outputs", []).append(file_id)

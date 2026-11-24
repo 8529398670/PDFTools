@@ -18,12 +18,15 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from app.core import bootstrap, config, db, rotate
 from app.core import backup
 from app.core import logs
 from app.models import credentials, login_tokens, users
+from app.models import api_keys
+from app.models import portal
 
 USAGE = """manage -- account administration for PDFTools
 
@@ -39,6 +42,10 @@ Usage:
   reset-2fa       --user-id 3           take two-factor sign-in off an account
   delete-user     --user-id 3 --yes     remove the account and everything it held
   transfer-owner  --user-id 3           make another enabled admin the owner
+  list-keys       [--user-id 3]         API keys, whose they are, when last used
+  create-key      --user-id 3 --name "CI" [--role user] [--days 90]
+  revoke-key      --key-id abc123       kill one API key now, keep its record
+  delete-key      --key-id abc123       kill one API key now and remove its record
   backup          [--out path] [--include-key]
                                         one file with the database, config.yaml and
                                         storage, safe while the server runs
@@ -54,6 +61,11 @@ Usage:
 The owner is the first admin, and the one account that can delete other
 admins from the web UI. Nothing deletes or disables the owner -- move it with
 transfer-owner first. delete-user cannot be undone, hence --yes.
+
+An API key carries a role from the same set users do, so an admin-scoped key
+can do what an admin can and a user-scoped one cannot. A key never outranks
+the account it belongs to. --days 0 means it never expires; omit --days to use
+the server's configured default.
 
 A backup leaves secret.key out unless --include-key says otherwise, so keep a
 copy of the key apart from your backups. Without it a backup cannot be read.
@@ -128,6 +140,26 @@ def build_parser() -> argparse.ArgumentParser:
     p = commands.add_parser("transfer-owner", help="make another enabled admin the owner")
     p.add_argument("--user-id", type=int, required=True)
 
+    p = commands.add_parser("list-keys", help="API keys, whose they are, when last used")
+    p.add_argument("--user-id", type=int, default=None, help="only this user's keys (default: everyone's)")
+
+    p = commands.add_parser("create-key", help="mint an API key for an account")
+    p.add_argument("--user-id", type=int, required=True, help="id of the account the key belongs to")
+    p.add_argument("--name", required=True, help='what this key is for, e.g. "deploy bot"')
+    p.add_argument("--role", choices=[users.ROLE_VIEWER, users.ROLE_USER, users.ROLE_ADMIN], default=users.ROLE_USER,
+                   help="never more than the account has")
+    p.add_argument("--days", type=int, default=None,
+                   help="lifetime in days; 0 never expires; omit for the server default")
+
+    p = commands.add_parser("portal-connect", help="ProjectPortal's own account and admin key, shown once")
+    p.add_argument("--name", default="ProjectPortal", help="the service account's name")
+    p.add_argument("--days", type=int, default=365, help="the key's lifetime in days, 1-365")
+
+    p = commands.add_parser("revoke-key", help="kill one API key now, keep its record")
+    p.add_argument("--key-id", required=True, help="id of the key to revoke (from list-keys)")
+
+    p = commands.add_parser("delete-key", help="kill one API key now and remove its record")
+    p.add_argument("--key-id", required=True, help="id of the key to delete (from list-keys)")
 
 
     p = commands.add_parser("backup", help="one file with the database, config.yaml and storage")
@@ -204,6 +236,11 @@ def run(arguments: list[str]) -> None:
         "reset-2fa": command_reset_two_factor,
         "delete-user": command_delete_user,
         "transfer-owner": command_transfer_owner,
+        "list-keys": command_list_keys,
+        "create-key": command_create_key,
+        "portal-connect": command_portal_connect,
+        "revoke-key": command_revoke_key,
+        "delete-key": command_delete_key,
         "backup": command_backup,
     }
     try:
@@ -287,6 +324,7 @@ def command_revoke_access(store: db.Store, cfg: config.Config, args: argparse.Na
     print(
         f"user #{user.id} ({user.display_name}): ended {revoked.sessions} sessions, deleted "
         f"{revoked.login_links} live login links"
+        f", revoked {revoked.api_keys} API keys"
     )
     print(f"To let them back in: python -m app manage reissue-login --user-id {user.id}")
 
@@ -316,6 +354,7 @@ def command_delete_user(store: db.Store, cfg: config.Config, args: argparse.Name
     print(
         f"user #{user.id} ({user.display_name}) deleted, with {removed.sessions} sessions, "
         f"{removed.login_links} login links"
+        f" and {removed.api_keys} API keys"
     )
 
 
@@ -324,6 +363,104 @@ def command_transfer_owner(store: db.Store, cfg: config.Config, args: argparse.N
     if user is None:
         raise ManageError(f"no user with id {args.user_id}")
     print(f"user #{user.id} ({user.display_name}) is now the owner")
+
+
+def format_time(value: datetime | None, absent: str = "never") -> str:
+    """Minute precision keeps the listings narrow -- enough for "when was this
+    last used", and a full timestamp per column would wrap any normal
+    terminal."""
+    return absent if value is None else value.astimezone().strftime("%Y-%m-%d %H:%M")
+
+
+def key_status(key: api_keys.APIKey) -> str:
+    if key.revoked:
+        return "revoked"
+    if key.expired:
+        return "expired"
+    return "active"
+
+
+def command_list_keys(store: db.Store, cfg: config.Config, args: argparse.Namespace) -> None:
+    keys = (
+        api_keys.list_api_keys(store)
+        if args.user_id is None
+        else api_keys.list_api_keys_for_user(store, args.user_id)
+    )
+    if not keys:
+        print('No API keys. Create one with: python -m app manage create-key --user-id <id> --name "CI"')
+        return
+    names = {user.id: user.display_name for user in users.list_users(store)}
+    row = "{:<18} {:<22} {:<6} {:<20} {:<8} {:<16} {}"
+    print(row.format("KEY ID", "NAME", "ROLE", "OWNER", "STATUS", "LAST USED", "EXPIRES"))
+    for key in keys:
+        print(row.format(
+            key.id, key.name, key.role, names.get(key.user_id, f"#{key.user_id}"), key_status(key),
+            format_time(key.last_used_at), format_time(key.expires_at),
+        ))
+
+
+def command_portal_connect(store: db.Store, cfg: config.Config, args: argparse.Namespace) -> None:
+    """The owner's Connect on the API keys screen, for a headless install:
+    ProjectPortal's service account (made when there is none by that name)
+    and one admin key for it that may make keys, shown once. The shell is
+    the owner's say-so."""
+    if not cfg.api_keys_enabled:
+        raise ManageError("api keys are disabled on this server (auth.api_keys: false)")
+    if not 1 <= args.days <= 365:
+        raise ManageError("--days must be 1-365")
+    try:
+        credential, key, user = portal.connect_portal(store, None, args.name, args.days * 24 * 60 * 60)
+    except (portal.BadPortalNameError, users.OwnerRequiredError, api_keys.APIKeyError) as error:
+        raise ManageError(str(error) or "there is no owner yet") from None
+    bootstrap.print_api_key(
+        cfg,
+        f"ProjectPortal's admin key {key.name!r} for #{user.id} {user.display_name!r} -- paste it into ProjectPortal: Catalog, this app, Admin key",
+        credential,
+        format_time(key.expires_at),
+    )
+
+
+def command_create_key(store: db.Store, cfg: config.Config, args: argparse.Namespace) -> None:
+    """How a CI system or a cron job gets a credential without anyone signing
+    in. --role is what "mirroring admin and non-admin permissions" means in
+    practice: --role admin produces a key that can do what an admin can, and
+    the default produces one that cannot."""
+    # Refuse rather than mint something that cannot be used: with the feature
+    # off the server ignores the Authorization header entirely.
+    if not cfg.api_keys_enabled:
+        raise ManageError("api keys are disabled on this server (auth.api_keys: false)")
+    if not api_keys.valid_name(args.name):
+        raise ManageError("--name must be 1-80 characters")
+    owner = require_user(store, args.user_id)
+    ttl_seconds = api_keys.ttl_from_days(args.days, cfg.api_key_ttl_seconds)
+    if ttl_seconds is None:
+        raise ManageError(f"--days must be 0 (never) or up to {api_keys.API_KEY_MAX_DAYS}")
+    try:
+        credential, key = api_keys.issue_api_key(store, owner.id, args.name, args.role, ttl_seconds)
+    except api_keys.APIKeyError as error:
+        raise ManageError(str(error)) from None
+    bootstrap.print_api_key(
+        cfg,
+        f"{key.role}-scoped {key.name!r} for #{owner.id} {owner.display_name!r}",
+        credential,
+        format_time(key.expires_at),
+    )
+
+
+def command_revoke_key(store: db.Store, cfg: config.Config, args: argparse.Namespace) -> None:
+    key = api_keys.revoke_api_key(store, args.key_id)
+    if key is None:
+        raise ManageError(f"no api key with id {args.key_id}")
+    print(f"api key {key.id} ({key.name!r}, owner #{key.user_id}) revoked -- it stops working immediately")
+
+
+def command_delete_key(store: db.Store, cfg: config.Config, args: argparse.Namespace) -> None:
+    """revoke-key without the record left behind. Unlike deleting in the web
+    UI there is no undo here, so the row goes at once (purge_api_key)."""
+    key = api_keys.get_api_key(store, args.key_id)
+    if key is None or not api_keys.purge_api_key(store, key.id):
+        raise ManageError(f"no api key with id {args.key_id}")
+    print(f"api key {key.id} ({key.name!r}, owner #{key.user_id}) deleted -- it stops working immediately")
 
 
 def command_backup(store: db.Store, cfg: config.Config, args: argparse.Namespace) -> None:

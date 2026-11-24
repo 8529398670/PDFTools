@@ -27,6 +27,7 @@ from app.core.db import Store
 from app.core.logs import KIND_ADMIN
 from app.core.security import actor_from
 from app.models import credentials, from_iso, login_tokens, to_iso, users, utc_now
+from app.models import api_keys
 from app.models import two_factor
 from app.routes.helpers import DateTime, Dir, Page, Paged, Refused, act_on_refusals, get_config, get_store, service_account_refusal, sorted_page
 from app.routes.logs import audit
@@ -65,6 +66,7 @@ class Revoked(Reply):
     api_name: ClassVar[str] = "Revoked"
     sessions: int
     login_links: int
+    api_keys: Annotated[int, Meta(extra_json_schema={"x-feature": "api_keys"})]
 
 
 class UserRow(Reply):
@@ -243,6 +245,20 @@ class ReissueLogin(UserIDPath):
     expires_in_minutes: ExpiresInMinutes | None = None
 
 
+def key_login_link_options(request: Request, options: login_tokens.LinkOptions) -> login_tokens.LinkOptions:
+    """The rules for a login link an API key asks for its own account, the same
+    on every route that makes one: only a key its account let make sign-in
+    links (may_sign_in), and only once, for at most 15 minutes, whatever it
+    asked for. Unchanged for a browser session."""
+    actor = actor_from(request)
+    if actor.api_key is None:
+        return options
+    if not actor.api_key.may_sign_in:
+        raise Refused(403, "this key may not make sign-in links: turn that on for it on the API keys card")
+    ttl = options.ttl_seconds
+    if ttl <= 0 or ttl > api_keys.KEY_LOGIN_LINK_TTL_SECONDS:
+        ttl = api_keys.KEY_LOGIN_LINK_TTL_SECONDS
+    return replace(options, max_uses=1, unlimited=False, ttl_seconds=ttl)
 
 
 @route(
@@ -266,6 +282,8 @@ def reissue_login(request: Request, body: ReissueLogin) -> LoginLinkReply:
     # A key reissuing its own account's link is a key asking for a sign-in
     # link: the same rules as POST /api/account/login-link (may_sign_in, once,
     # 15 minutes), or this route would be the way round them.
+    if body.user_id == actor_from(request).user.id:
+        options = key_login_link_options(request, options)
     with act_on_refusals("reissue a login link for"):
         credential, info = login_tokens.issue_login_link(store, body.user_id, options)
     audit(request, KIND_ADMIN, "login link reissued", {"user_id": body.user_id, "max_uses": info["max_uses"], "expires_at": info["expires_at"]})

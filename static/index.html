@@ -5,7 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="light" />
   <title data-i18n="app.title">&nbsp;</title>
-  <link rel="icon" href="/favicon.ico" />
+  <link rel="icon" href="/favicon.ico" sizes="32x32" />
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#0d6efd" />
   <!-- Before the stylesheets paint, so a saved dark theme never flashes light. -->
   <script src="/js/theme.js"></script>
   <!-- Bootstrap 5 and its icon font, vendored (see /vendor/README.md), then
@@ -71,6 +75,7 @@
             <h3 class="sidebar-heading" data-i18n="nav.admin_heading"></h3>
             <a class="nav-link" href="/admin/users" data-nav="users"><i class="bi bi-people" aria-hidden="true"></i><span data-i18n="nav.users"></span></a>
             <a class="nav-link" href="/admin/retention" data-nav="retention"><i class="bi bi-hourglass-split" aria-hidden="true"></i><span data-i18n="nav.retention"></span></a>
+            <a class="nav-link" href="/admin/api-keys" data-nav="all-keys"><i class="bi bi-shield-lock" aria-hidden="true"></i><span data-i18n="nav.all_keys"></span></a>
             <a class="nav-link" href="/admin/logs" data-nav="logs"><i class="bi bi-journal-text" aria-hidden="true"></i><span data-i18n="nav.logs"></span></a>
             <a class="nav-link" href="/admin/jobs" data-nav="jobs"><i class="bi bi-clock-history" aria-hidden="true"></i><span data-i18n="nav.jobs"></span></a>
             <a class="nav-link" href="/admin/settings" data-nav="settings"><i class="bi bi-sliders" aria-hidden="true"></i><span data-i18n="nav.settings"></span></a>
@@ -258,6 +263,84 @@
             </div>
           </section>
 
+          <!--
+            API keys: the non-browser way in, for every signed-in user. The role
+            select is revealed only for an admin (see keys.js) because a key can
+            never carry more permission than the account that owns it.
+          -->
+          <section class="card" id="api-keys-panel" data-path="/account/api-keys" hidden>
+            <div class="card-body">
+              <h3 class="card-title" data-i18n="api_keys.heading"></h3>
+              <p class="text-body-secondary" data-i18n="api_keys.description"></p>
+              <p id="key-spec-line" class="small" hidden>
+                <span data-i18n="api_keys.spec_text"></span>
+                <a id="key-spec-link" target="_blank" rel="noopener noreferrer" data-i18n="api_keys.spec_link"></a>
+                <span id="key-doc-part" hidden>&middot;
+                  <a id="key-doc-link" target="_blank" rel="noopener noreferrer" data-i18n="api_keys.doc_link"></a>
+                </span>
+              </p>
+
+              <form id="create-key-form" data-write class="row g-3 align-items-end" autocomplete="off">
+                <div class="col-md">
+                  <label for="key-name" class="form-label" data-i18n="api_keys.name_label"></label>
+                  <input id="key-name" class="form-control" name="name" maxlength="80" required
+                         data-i18n-attr="placeholder:api_keys.name_placeholder" />
+                </div>
+                <div class="col-md" id="key-role-field" hidden>
+                  <label for="key-role" class="form-label" data-i18n="api_keys.role_label"></label>
+                  <select id="key-role" class="form-select" name="role">
+                    <option value="user" data-i18n="api_keys.role_user"></option>
+                    <option value="viewer" data-i18n="api_keys.role_viewer"></option>
+                    <option value="admin" data-i18n="api_keys.role_admin"></option>
+                  </select>
+                </div>
+                <div class="col-md">
+                  <label for="key-days" class="form-label" data-i18n="api_keys.days_label"></label>
+                  <input id="key-days" class="form-control" name="expires_in_days" type="number" min="0" max="3650" inputmode="numeric"
+                         data-i18n-attr="placeholder:api_keys.days_placeholder" />
+                </div>
+                <div class="col-md-auto">
+                  <button type="submit" class="btn btn-primary" data-i18n="api_keys.create_button"></button>
+                </div>
+              </form>
+
+              <div id="key-secret-box" class="alert alert-info alert-dismissible mt-3" hidden>
+                <button type="button" class="btn-close" data-box-close="key-name" data-i18n-attr="aria-label:nav.close"></button>
+                <p class="mb-2" data-i18n="api_keys.secret_notice"></p>
+                <div class="link-box">
+                  <code id="key-secret-value"></code>
+                  <button id="copy-key-button" class="btn btn-sm btn-outline-secondary" data-i18n="api_keys.copy_button"></button>
+                </div>
+              </div>
+
+              <div class="mt-4" role="search">
+                <label for="keys-search" class="visually-hidden" data-i18n="api_keys.search_label"></label>
+                <input id="keys-search" class="form-control" type="search" autocomplete="off"
+                       data-i18n-attr="placeholder:api_keys.search_label" />
+              </div>
+              <div class="form-check mt-2">
+                <input id="keys-live-only" class="form-check-input" type="checkbox" />
+                <label for="keys-live-only" class="form-check-label" data-i18n="api_keys.live_only_label"></label>
+              </div>
+
+              <div class="table-responsive mt-3">
+                <table id="keys-table" class="table table-hover align-middle mb-0" data-empty="api_keys.empty">
+                  <thead>
+                    <tr>
+                      <th scope="col" data-sort="name"><button type="button" class="th-sort" data-i18n="api_keys.table_name"></button></th>
+                      <th scope="col" data-sort="role"><button type="button" class="th-sort" data-i18n="api_keys.table_role"></button></th>
+                      <th scope="col" data-i18n="api_keys.table_status"></th>
+                      <th scope="col" data-sort="last_used_at"><button type="button" class="th-sort" data-i18n="api_keys.table_last_used"></button></th>
+                      <th scope="col" data-sort="expires_at"><button type="button" class="th-sort" data-i18n="api_keys.table_expires"></button></th>
+                      <th scope="col" data-i18n="api_keys.table_actions"></th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
           <!-- Every device with a live session on this account; see sessions.js.
                Folded away until opened, and remembered open or shut in this
                browser. It is only fetched while open. -->
@@ -402,7 +485,7 @@
             <!-- The tool's drop zone, the same as My files'. Where it runs is
                  the account's choice (Account > Where your tools run), never
                  shown here: on this device with qpdf as WebAssembly, or
-                 imported into My files for the server. See js/local.js. -->
+                 uploaded and split as runs on the server. See js/local.js. -->
             <section id="local-card" class="card" hidden>
               <div class="card-body">
                 <div id="local-drop-zone" class="drop-zone border border-2 rounded-3 p-4 p-lg-5 text-center">
@@ -415,6 +498,20 @@
                   </div>
                   <input id="local-pick" class="visually-hidden" type="file" accept=".pdf,application/pdf" multiple tabindex="-1" aria-hidden="true" />
                   <input id="local-pick-folder" class="visually-hidden" type="file" multiple webkitdirectory tabindex="-1" aria-hidden="true" />
+                </div>
+                <!-- Only when splits run on the server: what happens to each
+                     upload afterwards (File.keep). -->
+                <div id="local-keep-row" class="row g-2 align-items-center mt-2" hidden>
+                  <div class="col-12 col-md-auto">
+                    <label for="local-keep" class="col-form-label small" data-i18n="local.keep_label"></label>
+                  </div>
+                  <div class="col-12 col-md-auto">
+                    <select id="local-keep" class="form-select form-select-sm">
+                      <option value="run" data-i18n="local.keep_run"></option>
+                      <option value="day" data-i18n="local.keep_day"></option>
+                      <option value="" data-i18n="local.keep_policy"></option>
+                    </select>
+                  </div>
                 </div>
                 <div id="local-batch" class="mt-3" hidden>
                   <div class="row g-2 align-items-center mb-2">
@@ -653,6 +750,125 @@
                       <th scope="col" data-i18n="sessions.table_seen"></th>
                       <th scope="col" data-i18n="sessions.table_signed_in"></th>
                       <th scope="col" data-i18n="sessions.table_actions"></th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <!-- Every key in the app, whoever owns it: the admin answer to "what
+             has standing access", and where a lost laptop's key gets killed. -->
+        <section class="view" data-view="all-keys" data-path="/admin/api-keys" id="admin-keys-panel" hidden>
+          <h2 class="view-title" data-i18n="admin_keys.heading"></h2>
+          <p class="view-description" data-i18n="admin_keys.description"></p>
+
+          <!-- ProjectPortal's own account (portal.js): the owner's only. -->
+          <section class="card" id="portal-card" hidden>
+            <div class="card-body">
+              <h3 class="card-title"><i class="bi bi-plug me-2" aria-hidden="true"></i><span data-i18n="portal.heading"></span></h3>
+              <p class="text-body-secondary" data-i18n="portal.description"></p>
+              <form id="portal-connect-form" class="row g-3 align-items-end" autocomplete="off">
+                <div class="col-12 col-md">
+                  <label for="portal-name" class="form-label" data-i18n="portal.name_label"></label>
+                  <input id="portal-name" class="form-control" name="name" maxlength="80" value="ProjectPortal" required />
+                </div>
+                <div class="col-12 col-md-3">
+                  <label for="portal-days" class="form-label" data-i18n="portal.days_label"></label>
+                  <input id="portal-days" class="form-control" name="days" type="number" min="1" max="365" value="365" inputmode="numeric" required />
+                </div>
+                <div class="col-12 col-md-auto">
+                  <button type="submit" class="btn btn-primary w-100"><i class="bi bi-link-45deg me-1" aria-hidden="true"></i><span data-i18n="portal.connect_button"></span></button>
+                </div>
+              </form>
+
+              <div id="portal-key-box" class="alert alert-info alert-dismissible mt-3 mb-0" hidden>
+                <button type="button" class="btn-close" data-box-close="portal-name" data-i18n-attr="aria-label:nav.close"></button>
+                <p class="mb-2" data-i18n="api_keys.secret_notice"></p>
+                <div class="link-box">
+                  <code id="portal-key-value"></code>
+                  <button id="copy-portal-key-button" type="button" class="btn btn-sm btn-outline-secondary" data-i18n="api_keys.copy_button"></button>
+                </div>
+                <p class="mt-2 mb-0" data-i18n="portal.paste_hint"></p>
+              </div>
+
+              <h4 class="h6 mt-4" data-i18n="portal.status_heading"></h4>
+              <ul id="portal-status" class="list-group mb-3"></ul>
+              <button id="portal-disconnect-button" type="button" class="btn btn-outline-danger" hidden><i class="bi bi-plug-fill me-1" aria-hidden="true"></i><span data-i18n="portal.disconnect_button"></span></button>
+            </div>
+          </section>
+
+          <!-- A key that acts as someone else. keys.js fills the picker with
+               only the accounts the server would allow. -->
+          <section class="card">
+            <div class="card-body">
+              <h3 class="card-title" data-i18n="admin_keys.create_heading"></h3>
+              <p class="text-body-secondary" data-i18n="admin_keys.create_description"></p>
+              <form id="create-user-key-form" class="row g-3 align-items-end" autocomplete="off">
+                <div class="col-md">
+                  <label for="user-key-user" class="form-label" data-i18n="admin_keys.user_label"></label>
+                  <select id="user-key-user" class="form-select" name="user_id" required></select>
+                </div>
+                <div class="col-md">
+                  <label for="user-key-name" class="form-label" data-i18n="api_keys.name_label"></label>
+                  <input id="user-key-name" class="form-control" name="name" maxlength="80" required
+                         data-i18n-attr="placeholder:api_keys.name_placeholder" />
+                </div>
+                <div class="col-md">
+                  <label for="user-key-role" class="form-label" data-i18n="api_keys.role_label"></label>
+                  <select id="user-key-role" class="form-select" name="role">
+                    <option value="user" data-i18n="api_keys.role_user"></option>
+                    <option value="viewer" data-i18n="api_keys.role_viewer"></option>
+                    <option value="admin" data-i18n="api_keys.role_admin"></option>
+                  </select>
+                </div>
+                <div class="col-md">
+                  <label for="user-key-days" class="form-label" data-i18n="api_keys.days_label"></label>
+                  <input id="user-key-days" class="form-control" name="expires_in_days" type="number" min="0" max="3650" inputmode="numeric"
+                         data-i18n-attr="placeholder:api_keys.days_placeholder" />
+                </div>
+                <div class="col-md-auto">
+                  <button type="submit" class="btn btn-primary" data-i18n="api_keys.create_button"></button>
+                </div>
+              </form>
+
+              <div id="user-key-secret-box" class="alert alert-info alert-dismissible mt-3 mb-0" hidden>
+                <button type="button" class="btn-close" data-box-close="user-key-name" data-i18n-attr="aria-label:nav.close"></button>
+                <p class="mb-2" data-i18n="api_keys.secret_notice"></p>
+                <div class="link-box">
+                  <code id="user-key-secret-value"></code>
+                  <button id="copy-user-key-button" type="button" class="btn btn-sm btn-outline-secondary" data-i18n="api_keys.copy_button"></button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-body">
+              <h3 class="card-title" data-i18n="admin_keys.list_heading"></h3>
+              <div role="search">
+                <label for="admin-keys-search" class="visually-hidden" data-i18n="api_keys.all_search_label"></label>
+                <input id="admin-keys-search" class="form-control" type="search" autocomplete="off"
+                       data-i18n-attr="placeholder:api_keys.all_search_label" />
+              </div>
+              <div class="form-check mt-2">
+                <input id="admin-keys-live-only" class="form-check-input" type="checkbox" />
+                <label for="admin-keys-live-only" class="form-check-label" data-i18n="api_keys.live_only_label"></label>
+              </div>
+
+              <div class="table-responsive mt-3">
+                <table id="admin-keys-table" class="table table-hover align-middle mb-0" data-empty="api_keys.all_empty">
+                  <thead>
+                    <tr>
+                      <th scope="col" data-sort="display_name"><button type="button" class="th-sort" data-i18n="admin_keys.table_owner"></button></th>
+                      <th scope="col" data-sort="name"><button type="button" class="th-sort" data-i18n="api_keys.table_name"></button></th>
+                      <th scope="col" data-sort="role"><button type="button" class="th-sort" data-i18n="api_keys.table_role"></button></th>
+                      <th scope="col" data-i18n="api_keys.table_status"></th>
+                      <th scope="col" data-sort="last_used_at"><button type="button" class="th-sort" data-i18n="api_keys.table_last_used"></button></th>
+                      <th scope="col" data-sort="expires_at"><button type="button" class="th-sort" data-i18n="api_keys.table_expires"></button></th>
+                      <th scope="col" data-i18n="api_keys.table_actions"></th>
                     </tr>
                   </thead>
                   <tbody></tbody>
@@ -928,8 +1144,11 @@
   <script src="/js/track.js"></script>
   <script src="/js/nav.js"></script>
   <script src="/js/pager.js"></script>
+  <script src="/js/keys.js"></script>
+  <script src="/js/portal.js"></script>
   <script src="/js/sessions.js"></script>
   <script src="/js/library.js"></script>
+  <script src="/js/zip.js"></script>
   <script src="/js/local.js"></script>
   <script src="/js/tools.js"></script>
   <script src="/js/tool_modes.js"></script>

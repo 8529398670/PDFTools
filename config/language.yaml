@@ -42,6 +42,7 @@ nav:
   admin_heading: "Admin"
   users: "Users"
   retention: "Retention"
+  all_keys: "All API keys"
   logs: "Logs"
   jobs: "Jobs"
   settings: "Settings"
@@ -140,8 +141,10 @@ undo:
   ip_name: "address name deleted"
   sidebar: "sidebar"
   rename: "name changed"
+  rename_key: "API key name changed"
   rename_file: "file name changed"
   rename_session: "device name changed"
+  deleted_key: "API key deleted"
   deleted_file: "file deleted"
   deleted_run: "run deleted"
   retention: "retention changed"
@@ -366,7 +369,7 @@ two_factor:
   download_button: "Download"
   recovery_filename: "recovery-codes.txt"
   heading: "Two-factor sign-in"
-  description: "Ask for a code from an authenticator app every time you sign in in a browser, whichever way you sign in."
+  description: "Ask for a code from an authenticator app every time you sign in in a browser, whichever way you sign in. API keys are not affected."
   status_on: "On"
   status_off: "Off"
   start_button: "Set up"
@@ -414,6 +417,7 @@ admin:
   role_select_label: "Role of {name}"
   role_confirm: "Make {name} {role}? It applies at once. Becoming an admin signs them out everywhere."
   two_factor_badge: "2FA"
+  service_badge: "Service"
   reissue_button: "New link"
   # The New link dialog: its heading, and the line under the choices.
   reissue_heading: "New login link for {name}"
@@ -422,28 +426,99 @@ admin:
   link_for: "Login link for {name}"
   revoke_button: "Revoke access"
   # {name} is replaced with the account's display name.
-  revoke_confirm: "End every session and login link that {name} has? The account stays enabled; send them a new link to let them back in."
+  revoke_confirm: "End every session, login link and API key that {name} has? The account stays enabled; send them a new link to let them back in."
   reset_two_factor_button: "Reset 2FA"
   # {name} is replaced with the account's display name.
   reset_two_factor_confirm: "Turn off two-factor sign-in for {name}? Do this only if you are sure it is them asking."
   make_admin_confirm: "Make {name} an admin? They can then manage accounts. This signs them out everywhere and stops their login link, so send them a new link."
-  make_user_confirm: "Take admin rights from {name}? It applies at once."
+  make_user_confirm: "Take admin rights from {name}? It applies at once. Their admin API keys drop to user level."
   role_changed_toast: "{name} is now: {role}"
   disable_button: "Disable"
   # {name} is replaced with the account's display name. Empty this string to
   # stop asking for confirmation before disabling.
-  disable_confirm: "Disable {name}? They are signed out everywhere and their login link stops working."
+  disable_confirm: "Disable {name}? They are signed out everywhere, their login link stops working, and their API keys stop until the account is enabled again."
   # Shown once it is done. {name} as above. Empty either to switch it off.
   disabled_toast: "{name} disabled"
-  revoked_toast: "{name} is signed out everywhere, and their links have stopped working."
+  revoked_toast: "{name} is signed out everywhere, and their links and keys have stopped working."
   two_factor_reset_toast: "Two-factor sign-in reset for {name}."
   enabled_toast: "{name} enabled. They may need a new link to sign in."
   enable_button: "Enable"
   delete_button: "Delete"
   # Empty this string to stop asking for confirmation before deleting.
-  delete_confirm: "Permanently delete {name}? Their sessions and login links go with the account, and it cannot be undone. Disable the account instead if they might come back."
+  delete_confirm: "Permanently delete {name}? Their sessions, login links and API keys go with the account, and it cannot be undone. Disable the account instead if they might come back."
   # Shown after the role of the one owner account, e.g. "admin (owner)".
   owner_label: "owner"
+
+api_keys:
+  empty: "No API keys yet."
+  all_empty: "No one has an API key yet."
+  search_label: "Search by name"
+  all_search_label: "Search by name or owner"
+  live_only_label: "Hide revoked and expired keys"
+  heading: "API keys"
+  description: "For scripts, cron jobs, and other services. A key does exactly what your account can do -- send it as an Authorization: Bearer header. It is shown once."
+  name_label: "What is it for"
+  name_placeholder: "Bot-1"
+  role_label: "Permission"
+  role_user: "user"
+  role_viewer: "viewer (can only look)"
+  role_admin: "admin (can manage accounts)"
+  # Under the description, with a link to the API reference: api.json in
+  # app.repo, or this server's own copy.
+  spec_text: "What a key can call:"
+  spec_link: "API reference (api.json)"
+  # Beside it: the same reference as tables, config/api.md, on the repository's
+  # site when app.repo is set, else on this server's /docs/api page.
+  doc_link: "readable version (api.md)"
+  days_label: "Expires in (days)"
+  days_placeholder: "leave blank for the default, 0 for never"
+  create_button: "Create key"
+  secret_notice: "Copy this now. It is shown once and cannot be recovered -- if you lose it, revoke the key and create another."
+  copy_button: "Copy"
+  table_name: "Name"
+  table_role: "Permission"
+  table_status: "Status"
+  table_last_used: "Last used"
+  table_expires: "Expires"
+  table_actions: "Actions"
+  status_active: "active"
+  status_revoked: "revoked"
+  status_expired: "expired"
+  never: "never"
+  # Empty expiry_button to take the button away.
+  expiry_button: "Expiry"
+  # {name} is the key's name.
+  expiry_heading: "Change when {name} expires"
+  expiry_help: "Counted from today. 0 means it never expires."
+  expiry_changed: "Expiry changed."
+  # Letting a key make a login link for your account (an agent signing you in
+  # on a browser). Off by default; the button shows the state it is in.
+  # Empty both button strings to take the switch away.
+  sign_in_off_button: "Sign-in links: off"
+  sign_in_on_button: "Sign-in links: on"
+  # Beside the status while it is on.
+  status_sign_in: "can sign in"
+  # Asked before turning it on. Empty it to stop asking.
+  sign_in_confirm: "Let this key make sign-in links for your account? Whoever holds the key could then open a browser signed in as you, with everything you can do there. Each link works once, for 15 minutes. You can turn this off again at any time."
+  sign_in_turned_on: "This key can now make sign-in links."
+  sign_in_turned_off: "This key can no longer make sign-in links. Any unused link it made has stopped working."
+  # The owner's switch for letting one of the owner's admin keys mint keys
+  # for other accounts, as an outside admin tool needs.
+  mint_off_button: "Key minting: off"
+  mint_on_button: "Key minting: on"
+  status_mint: "mints keys"
+  minted_by: "minted by key {key}"
+  mint_confirm: "Let this key mint and revoke API keys for every other account? Whoever holds it can then act as anyone but you, through the keys it makes. Every key it mints is revoked when you revoke this one."
+  mint_turned_on: "This key can now mint keys."
+  mint_turned_off: "This key can no longer mint keys. The keys it already minted keep working until you revoke this one."
+  revoke_button: "Revoke"
+  # Empty this string to stop asking for confirmation before revoking.
+  revoke_confirm: "Revoke this key? Anything using it stops working immediately."
+  delete_button: "Delete"
+  # Under a key an admin made for someone else. {name} is that admin.
+  created_by: "Created by {name}"
+  # Followed by when, as in "Created 3 days ago".
+  created: "Created"
 
 # The readable API and MCP references (static/docs.html, static/js/docs.js):
 # /docs/api and /docs/mcp, linked from the API keys and MCP cards when
@@ -627,7 +702,21 @@ local:
   auto_server: "Automatic picks the server: this device has {cores} cores{memory}, and splitting here wants at least 4 cores and 4 GB."
   memory: ", {gb} GB"
   unsupported: "This browser cannot split on this device, so splits run on the server."
-  imported_for_server: "Importing {count} into My files. Split them from there once they have been read."
+  # While a PDF goes up to the server: checking whether it is there already,
+  # then sending it.
+  checking: "Checking {percent}%"
+  uploading: "Uploading {percent}%"
+  queued: "Queued on the server"
+  keep_label: "After the split, your uploaded PDF is"
+  keep_run: "deleted right away"
+  keep_day: "kept for 24 hours"
+  keep_policy: "kept as your retention setting says"
+  restart: "Restart"
+  downloading: "Downloading {name}."
+  download_again: "Download again"
+  ready: "{count} files are ready."
+  zip_one: "{name} - sections.zip"
+  zip_many: "PDFTools - {count} files.zip"
   reading: "Reading"
   waiting: "Waiting"
   # {percent} done, on {name}: the section being written.
@@ -642,7 +731,7 @@ local:
   summary_running: "Splitting {done} of {count}"
   summary_finished: "Split {done} of {count}"
   cancel: "Stop"
-  download_all: "Download all"
+  download_all: "Download all (.zip)"
   save_folder: "Save all to a folder"
   saved_folder: "Saved {count} files to {folder}."
   download: "Download"
@@ -653,6 +742,11 @@ local:
     no_bookmarks: "No bookmarks to split at"
     qpdf_failed: "qpdf could not write a section"
     memory: "This device ran out of memory. Try the server instead."
+    upload: "The upload did not finish"
+    not_readable: "Cannot be read"
+    source_gone: "The PDF was deleted"
+    file_quota: "That would go over your storage limit"
+    internal: "Something went wrong on the server"
     failed: "Something went wrong"
 
 # What each action is called; see app/actions/.
@@ -686,6 +780,7 @@ runs:
   show_button: "Show files"
   hide_button: "Hide files"
   delete_button: "Delete"
+  restart_button: "Restart"
   section_pages: "{count} pages"
   loading: "Loading"
   errors:
@@ -752,6 +847,28 @@ files:
   size_kb: "{count} KB"
   size_mb: "{count} MB"
   size_gb: "{count} GB"
+
+portal:
+  heading: "ProjectPortal"
+  description: "Connect ProjectPortal through an account of its own, never yours. Its key may make keys for the accounts it runs, and never signs anyone in. Only you can change that account or cut it off."
+  name_label: "Account name"
+  days_label: "Key lifetime (days)"
+  connect_button: "Connect"
+  paste_hint: "Paste it into ProjectPortal: Catalog → this app → Admin key"
+  status_heading: "Its keys"
+  none: "Not connected."
+  expires: "Expires {date}"
+  never_expires: "Never expires"
+  disconnect_button: "Disconnect"
+  disconnect_confirm: "Disconnect ProjectPortal? Its keys stop working now, and so does every key and login link they made."
+admin_keys:
+  heading: "All API keys"
+  description: "Every key in this app and who owns it. Revoke or delete one to cut off whatever is using it, right away."
+  table_owner: "Owner"
+  create_heading: "Create a key for someone"
+  create_description: "The key acts as that person, at no more than their permission, and they can see that you made it."
+  list_heading: "Every key"
+  user_label: "Account"
 
 # The Logs screen (owner only; static/js/logs.js). Placeholders in {braces}
 # are filled in by the page. Days are UTC dates; times are the viewer's own.
@@ -820,6 +937,8 @@ logs:
   table_what: "What"
   table_ip: "IP"
   anonymous: "signed out"
+  via_key: "(API key)"
+  via_named_key: "· key {name}"
 
 # The Jobs screen (owner only; static/js/jobs.js). A job you add can have a
 # name here, as job_<name> with dashes as underscores; one without shows its

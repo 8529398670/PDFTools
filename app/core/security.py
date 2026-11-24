@@ -25,12 +25,14 @@ from app.core.config_live import Holder
 from app.core.db import Store
 from app.core.error_codes import CODE_KEY_MINTING_OFF, CODE_NOT_ADMIN, CODE_NOT_AUTHENTICATED, CODE_NOT_FOUND, CODE_SESSION_ONLY, CODE_VIEW_ONLY, error_body
 from app.models import utc_now
+from app.models.api_keys import APIKey, load_api_key, narrow_role
 from app.models.sessions import Session, load_session, touch_session
 from app.models.users import ROLE_ADMIN, ROLE_VIEWER, User, get_owner_id
 
 # Auth method names, as reported by /api/me. Worth exposing so a client can
 # tell a browser session from a key without guessing.
 METHOD_SESSION = "session"
+METHOD_API_KEY = "api_key"
 
 
 @dataclass
@@ -44,6 +46,7 @@ class Actor:
     user: User
     role: str
     session: Session | None = None
+    api_key: APIKey | None = None
     # This request moved the session's end, so the response carries the cookie
     # again. See LoadActor.
     session_extended: bool = False
@@ -61,14 +64,14 @@ class Actor:
     def via_api_key(self) -> bool:
         """Distinguishes the two doors. It decides the CSRF question below, and
         it is what an endpoint reads if it genuinely must be browser-only."""
-        return False
+        return self.api_key is not None
 
     @property
     def key_id(self) -> str:
         """The id of the API key this request came with, or "" for a browser
         session. A login link or invite link a key makes records it, so
         revoking the key voids them (see login_tokens.void_links_minted_by_key)."""
-        return ""
+        return self.api_key.id if self.api_key is not None else ""
 
     @property
     def lineage_key(self) -> str:
@@ -93,7 +96,7 @@ class Actor:
 
     @property
     def method(self) -> str:
-        return METHOD_SESSION
+        return METHOD_API_KEY if self.via_api_key else METHOD_SESSION
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +163,40 @@ def _resolve_session(store: Store, cfg: Config, cookies: dict[str, str]) -> Acto
     return Actor(user=user, role=user.role, session=session, session_extended=extended)
 
 
+def _resolve_api_key(store: Store, cfg: Config, authorization: str) -> Actor | None:
+    """Reads "Authorization: Bearer <id>.<secret>".
+
+    One header and one scheme, deliberately: a second accepted spelling (an
+    X-API-Key, a query parameter) is a second code path to audit, and a
+    credential in a query string ends up in access logs and browser history.
+
+    cfg.api_keys_enabled is checked here rather than only on the routes that
+    mint keys, so turning the feature off actually closes the door: the header
+    stops being believed at all, and existing keys stop authenticating."""
+    if not cfg.api_keys_enabled:
+        return None
+    # The scheme and the key, split on any whitespace, and nothing else.
+    parts = authorization.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    loaded = load_api_key(store, parts[1])
+    if loaded is None:
+        return None
+    key, user = loaded
+    # The ceiling, applied per request. See narrow_role: the stored role is
+    # what was asked for, this is what is granted.
+    return Actor(user=user, role=narrow_role(user.role, key.role), api_key=key)
+
+
+def _has_bearer(authorization: str) -> bool:
+    """True when the request carries any Authorization header. Any at all is
+    an attempt at a key, and one that does not hold a good key is nobody
+    (_resolve_api_key): it never falls back to the cookie. Splitting only on a
+    space let "Bearer<TAB>key" fall back and run as the signed-in account
+    (S16)."""
+    return authorization.strip() != ""
+
+
 def resolve_actor(store: Store, cfg: Config, cookies: dict[str, str], authorization: str) -> Actor | None:
     """An Authorization: Bearer header decides it: the request is that key or
     no one, and the cookie is not read. Otherwise the cookie. A script using
@@ -170,6 +207,8 @@ def resolve_actor(store: Store, cfg: Config, cookies: dict[str, str], authorizat
     another site cannot add one without a CORS preflight this server does not
     answer -- and a request that skips the token check by carrying a key
     needed that key to begin with."""
+    if _has_bearer(authorization):
+        return _resolve_api_key(store, cfg, authorization)
     return _resolve_session(store, cfg, cookies)
 
 
@@ -327,6 +366,23 @@ class RequireSession(Guard):
         return None
 
 
+class RequireKeyMinting(Guard):
+    """In front of the key-minting routes (/api/admin/users/{id}/keys and
+    revoking a key through /api/admin/keys/{id}/revoke), after RequireAdmin:
+    an admin session passes, and an API key only when the owner let it mint
+    keys (APIKey.may_mint_keys). Any other key gets 403 key_minting_off."""
+
+    statuses = (401, 403)
+
+    def refuse(self, request: Request) -> Response | None:
+        actor = actor_from(request)
+        if actor is None:
+            return _refuse(401, "not authenticated", CODE_NOT_AUTHENTICATED)
+        if actor.api_key is not None and not actor.api_key.may_mint_keys:
+            return _refuse(403, "key_minting_off", CODE_KEY_MINTING_OFF)
+        return None
+
+
 # What a viewer may still send besides reads: signing out, ending its own
 # sessions, and cancelling its own login link -- each only takes a way in
 # away. /mcp is let through because a viewer key reads through it, and MCP
@@ -431,6 +487,9 @@ def log_actor(actor: Actor | None) -> dict:
     if actor is None:
         return {"method": "anon"}
     result = {"user_id": actor.user.id, "name": actor.user.display_name, "role": actor.role, "method": actor.method}
+    if actor.api_key is not None:
+        result["key_id"] = actor.api_key.id
+        result["key_name"] = actor.api_key.name
     return result
 
 

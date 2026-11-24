@@ -25,6 +25,7 @@ rem
 rem   scripts\run.bat manage list-users
 rem   scripts\login.bat                           the owner's login link
 rem   scripts\run.bat manage create-login --name "Grace" --role user
+rem   scripts\run.bat manage create-key --user-id 1 --name "CI"
 rem   scripts\run.bat manage paths                        where the state lives
 rem   scripts\run.bat config check
 rem   scripts\run.bat version

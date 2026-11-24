@@ -14,7 +14,8 @@ everywhere else, and comes in the X-CSRF-Token header instead.
 from __future__ import annotations
 
 import shutil
-from typing import Annotated, ClassVar, Literal
+from datetime import datetime, timedelta
+from typing import Annotated, Any, ClassVar, Literal
 from urllib.parse import quote
 
 import msgspec
@@ -28,7 +29,7 @@ from app.core.config import FILE_CHUNK_BYTES
 from app.core.logs import KIND_ADMIN
 from app.core.runner import EVENT_FILES
 from app.core.security import Guard, actor_from
-from app.models import RestoreError, to_iso
+from app.models import RestoreError, to_iso, utc_now
 from app.models import files as models
 from app.models import retention
 from app.models import users
@@ -269,6 +270,7 @@ class CreateFile(RequestType):
     size: Annotated[int, Meta(ge=0, extra={"error": BAD_FILE})]
     type: Annotated[str, Meta(description="Shown in the list. Downloads are always application/octet-stream.")] = ""
     folder: Annotated[str, Meta(description="The folder it came in, relative to a dropped folder: shown, never a path on disk.")] = ""
+    keep: Annotated[Literal["", "run", "day"], Meta(description="For an upload made to run a tool on: \"run\" deletes it once a run on it is done, \"day\" keeps it 24 hours, \"\" (the default) follows the retention policy. Either choice expires in 24 hours at the latest.")] = ""
 
 
 @route(
@@ -284,13 +286,21 @@ def create_file(request: Request, body: CreateFile) -> FileUpload:
     try:
         file = models.create_file(
             store, get_config(request), user_id, body.name, body.type, body.size,
-            folder=body.folder, expires_at=retention.expiry_for(store, user_id, models.KIND_IMPORT),
+            folder=body.folder, expires_at=_expiry(store, user_id, body.keep), keep=body.keep,
         )
     except models.BadFileError as refusal:
         raise Refused(400, str(refusal)) from None
     except (models.FileTooLargeError, models.FileQuotaError) as refusal:
         raise Refused(409, str(refusal)) from None
     return _upload_row(file)
+
+
+def _expiry(store: Any, user_id: int, keep: str) -> datetime | None:
+    """When a new upload expires: a day from now when its uploader chose how
+    long to keep it, else as the retention policy says."""
+    if keep:
+        return utc_now() + timedelta(hours=models.KEEP_HOURS)
+    return retention.expiry_for(store, user_id, models.KIND_IMPORT)
 
 
 class ClaimFile(CreateFile, kw_only=True):
@@ -318,7 +328,7 @@ def claim_file(request: Request, body: ClaimFile) -> ClaimReply:
     try:
         asked = models.start_claim(
             store, get_config(request), user_id, body.fingerprint, body.name, body.type, body.size,
-            folder=body.folder, expires_at=retention.expiry_for(store, user_id, models.KIND_IMPORT),
+            folder=body.folder, expires_at=_expiry(store, user_id, body.keep), keep=body.keep,
         )
     except models.BadFileError as refusal:
         raise Refused(400, str(refusal)) from None

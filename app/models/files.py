@@ -71,6 +71,14 @@ READY = "ready"
 KIND_IMPORT = "import"
 KIND_OUTPUT = "output"
 
+# What someone uploading on a tool screen chose for the upload (File.keep).
+# Either way it expires in a day at the latest; KEEP_RUN goes sooner, once a
+# run on it is done (app/core/runner.py).
+KEEP_RUN = "run"
+KEEP_DAY = "day"
+KEEPS = ("", KEEP_RUN, KEEP_DAY)
+KEEP_HOURS = 24
+
 # What reading a PDF found (pdf_state). Pending until the inspect step has run.
 PDF_PENDING = "pending"
 PDF_OK = "ok"
@@ -178,6 +186,10 @@ class File:
     # The fingerprint of the shared bytes it points at; "" while it still has
     # its own (an upload, or one not adopted yet).
     blob: str = ""
+    # What its uploader chose for it on a tool screen: KEEP_RUN (deleted once
+    # a run on it is done), KEEP_DAY (24 hours), or "" (the retention policy).
+    # A file with a choice keeps its expiry when the policy changes.
+    keep: str = ""
 
     @property
     def deleted(self) -> bool:
@@ -232,6 +244,7 @@ class File:
             "pdf": self.pdf,
             "expires_at": to_iso(self.expires_at),
             "blob": self.blob,
+            "keep": self.keep,
         }
 
     @classmethod
@@ -258,6 +271,7 @@ class File:
             source_id=record.get("source_id", ""),
             pdf_state=record.get("pdf_state", PDF_PENDING),
             pdf_error=record.get("pdf_error", ""),
+            keep=record.get("keep", ""),
             pdf=record.get("pdf") or {},
             expires_at=from_iso(record.get("expires_at")),
             blob=record.get("blob", ""),
@@ -349,7 +363,7 @@ def storage_used(store: Store, user_id: int | None = None) -> int:
 
 def create_file(
     store: Store, cfg: Config, user_id: int, name: str, declared_type: str, size: int,
-    folder: str = "", expires_at: datetime | None = None,
+    folder: str = "", expires_at: datetime | None = None, keep: str = "",
 ) -> File:
     """Start an upload. The quota is checked in the same transaction that adds
     the record, so two uploads cannot both take the last of it. The upload is
@@ -376,6 +390,7 @@ def create_file(
         encrypted=encrypted,
         folder=clean_folder(folder),
         expires_at=expires_at,
+        keep=keep if keep in KEEPS else "",
     )
     with store.transaction() as transaction:
         if _used_bytes(transaction, user_id) + size > cfg.files.quota_bytes_per_user:
@@ -932,6 +947,7 @@ class _Claim:
     size: int
     folder: str
     expires_at: datetime | None
+    keep: str = ""
 
 
 _claims: dict[str, _Claim] = {}
@@ -959,7 +975,7 @@ def _read_plain_range(cfg: Config, blob: Record, offset: int, length: int) -> by
 
 def start_claim(
     store: Store, cfg: Config, user_id: int, fingerprint: str, name: str, declared_type: str, size: int,
-    folder: str = "", expires_at: datetime | None = None,
+    folder: str = "", expires_at: datetime | None = None, keep: str = "",
 ) -> tuple[str, list[tuple[int, int]]] | None:
     """The question for a client that says it has a file with this content:
     (claim id, the ranges to hash), or None when the server does not have it
@@ -983,7 +999,7 @@ def start_claim(
     with _claims_lock:
         for key in [key for key, claim in _claims.items() if claim.expires < now]:
             del _claims[key]
-        _claims[claim_id] = _Claim(user_id, fingerprint, ranges, now + CLAIM_SECONDS, name, declared_type, size, clean_folder(folder), expires_at)
+        _claims[claim_id] = _Claim(user_id, fingerprint, ranges, now + CLAIM_SECONDS, name, declared_type, size, clean_folder(folder), expires_at, keep if keep in KEEPS else "")
     return claim_id, ranges
 
 
@@ -1020,6 +1036,7 @@ def answer_claim(store: Store, cfg: Config, user_id: int, claim_id: str, hashes:
             folder=claim.folder,
             expires_at=claim.expires_at,
             blob=blob["id"],
+            keep=claim.keep,
         )
         found = sibling_pdf(store, blob["id"], file.id)
         if found is not None:

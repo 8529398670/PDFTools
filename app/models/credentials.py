@@ -14,7 +14,9 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 
 from app.core.db import BUCKET_USERS, Store, Transaction
+from app.core.db import BUCKET_API_KEYS
 from app.models import from_iso, to_iso, utc_now
+from app.models.api_keys import APIKey, void_what_keys_made_tx
 from app.models.login_tokens import delete_login_tokens_for_user, delete_pending_login_tokens
 from app.models.sessions import destroy_sessions_for_user
 from app.models.sign_in import delete_challenges_for_user
@@ -68,6 +70,7 @@ class Revoked:
 
     sessions: int = 0
     login_links: int = 0
+    api_keys: int = 0
 
     def to_dict(self) -> dict[str, int]:
         return asdict(self)
@@ -105,6 +108,7 @@ def set_user_disabled(store: Store, user_id: int, disabled: bool, actor_id: int 
             destroy_sessions_for_user(tx, user_id)
             delete_pending_login_tokens(tx, user_id)
             delete_challenges_for_user(tx, user_id)
+            void_what_keys_made_tx(tx, user_id)
     return True
 
 
@@ -166,6 +170,8 @@ def set_user_role(store: Store, user_id: int, actor_id: int, role: str) -> bool 
             destroy_sessions_for_user(tx, user_id)
             delete_pending_login_tokens(tx, user_id)
             delete_challenges_for_user(tx, user_id)
+        else:
+            void_what_keys_made_tx(tx, user_id)
     return True
 
 
@@ -215,6 +221,16 @@ def _revoke_all_tx(tx: Transaction, user_id: int, record: dict) -> Revoked:
         login_links=delete_pending_login_tokens(tx, user_id),
     )
     delete_challenges_for_user(tx, user_id)
+    now = to_iso(utc_now())
+    for key_id, key_record in tx.all(BUCKET_API_KEYS):
+        if key_record["user_id"] == user_id and APIKey.from_record(key_record).live:
+            key_record["revoked_at"] = now
+            tx.put(BUCKET_API_KEYS, key_id, key_record)
+            revoked.api_keys += 1
+    # What those keys made in other accounts -- links not yet used, the
+    # browsers those signed in, and the keys they minted, all the way
+    # down -- ends with them (S22).
+    void_what_keys_made_tx(tx, user_id)
     return revoked
 
 
@@ -251,9 +267,11 @@ def delete_user(store: Store, user_id: int, actor_id: int | None) -> Revoked | N
 
         # Before the key rows go: void_what_keys_made_tx finds the keys by
         # account, and what they made in other accounts ends with them (S22).
+        void_what_keys_made_tx(tx, user_id)
         removed = Revoked(
             sessions=destroy_sessions_for_user(tx, user_id),
             login_links=delete_login_tokens_for_user(tx, user_id),
+            api_keys=tx.delete_where(BUCKET_API_KEYS, lambda _key, key_record: key_record["user_id"] == user_id),
         )
         delete_challenges_for_user(tx, user_id)
         tx.delete(BUCKET_USERS, user_id)

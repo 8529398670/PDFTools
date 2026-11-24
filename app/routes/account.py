@@ -17,14 +17,32 @@ from app.core.encryption import BadKeyError, CipherTextError
 from app.core.logs import KIND_AUTH
 from app.core.security import actor_from, clear_session_cookie, decrypt_cookie
 from app.models import login_tokens, sessions, users
+from app.models import to_iso
+from app.models import api_keys
 from app.models import themes
 from app.models import two_factor
 from app.routes.api_docs_md import api_doc_url
 from app.routes.admin import CancelLoginLinkReply, DisplayName, ExpiresInMinutes, LoginLink, LoginLinkReply, MaxUses, OkReply, RenameUserReply, link_options, link_reply
+from app.routes.admin import key_login_link_options
 from app.routes.helpers import refuse_key_born
 from app.routes.helpers import Refused, get_config, get_store, run
+from app.routes.helpers import DateTime
 from app.routes.logs import audit
 from app.routes.themes import Theme, theme_list
+
+
+class MeKey(Reply, kw_only=True):
+    """What /api/me says about the calling key, so an outside tool knows
+    before it clicks whether the key can make keys, and when it stops
+    working."""
+
+    api_name: ClassVar[str] = "MeKey"
+    id: str
+    name: str
+    role: Annotated[Literal["admin", "user", "viewer"], Meta(description="The key's own role. The role it acts with is the lower of this and the account's.")]
+    may_mint_keys: Annotated[bool, Meta(description="Whether this key may make keys for other accounts.")]
+    may_sign_in: Annotated[bool, Meta(description="Whether this key may make a login link for its own account.")]
+    expires_at: Annotated[DateTime, Meta(description="When the key stops working. Absent when it never does.")] | UnsetType = UNSET
 
 
 class Me(Reply, kw_only=True):
@@ -61,10 +79,15 @@ class Me(Reply, kw_only=True):
     two_factor: Annotated[bool, Meta(extra_json_schema={"x-feature": "two_factor"})]
     two_factor_enabled: Annotated[bool, Meta(extra_json_schema={"x-feature": "two_factor"})]
     auth: str
+    api_keys_enabled: Annotated[bool, Meta(extra_json_schema={"x-feature": "api_keys"})]
     files_enabled: Annotated[bool, Meta(description="files.enabled: whether the Files screen and routes are on.", extra_json_schema={"x-feature": "files"})]
     logs_enabled: Annotated[bool, Meta(extra_json_schema={"x-feature": "logs"})]
     logs_ui_clicks: Annotated[bool, Meta(extra_json_schema={"x-feature": "logs"})]
     csrf_token: Annotated[str, Meta(description="Browser sessions only.")] | UnsetType = UNSET
+    api_key_id: Annotated[str, Meta(description="API keys only.", extra_json_schema={"x-feature": "api_keys"})] | UnsetType = UNSET
+    api_key_name: Annotated[str, Meta(description="API keys only.", extra_json_schema={"x-feature": "api_keys"})] | UnsetType = UNSET
+    may_mint_keys: Annotated[bool, Meta(description="API keys only: whether this key may make keys for other accounts.", extra_json_schema={"x-feature": "api_keys"})] | UnsetType = UNSET
+    key: Annotated[MeKey, Meta(description="API keys only: what this key may do.", extra_json_schema={"x-feature": "api_keys"})] | UnsetType = UNSET
 
 
 @route(
@@ -121,6 +144,7 @@ def me(request: Request) -> Me:
         two_factor=two_factor.is_on(actor.user),
         two_factor_enabled=cfg.two_factor_enabled,
         auth=actor.method,
+        api_keys_enabled=cfg.api_keys_enabled,
         files_enabled=cfg.files.enabled,
         # Whether track.js sends anything, and whether it sends clicks.
         logs_enabled=cfg.logs.enabled,
@@ -136,6 +160,16 @@ def me(request: Request) -> Me:
         reply.skill = skill
     if skill_commit:
         reply.skill_commit = skill_commit
+    if actor.api_key is not None:
+        reply.api_key_id = actor.api_key.id
+        reply.api_key_name = actor.api_key.name
+        reply.may_mint_keys = actor.api_key.may_mint_keys
+        reply.key = MeKey(
+            id=actor.api_key.id, name=actor.api_key.name, role=actor.api_key.role,  # type: ignore[arg-type]
+            may_mint_keys=actor.api_key.may_mint_keys, may_sign_in=actor.api_key.may_sign_in,
+        )
+        if actor.api_key.expires_at is not None:
+            reply.key.expires_at = to_iso(actor.api_key.expires_at)
     return reply
 
 
@@ -150,7 +184,15 @@ def capabilities(cfg: Config) -> list[str]:
     """The parts of the portal contract this app answers right now. Features
     switched off while the server runs drop out of the list with them."""
     found = ["viewer_role", "account_expiry"]
+    if cfg.api_keys_enabled:
+        found.append("key_minting")
+    if cfg.api_keys_enabled:
+        found.append("key_sign_in")
+        found.append("service_accounts")
+        found.append("key_grants")
     found.append("error_codes")
+    if cfg.api_keys_enabled:
+        found.append("key_rotation")
     found.append("admin_sessions")
     return found
 
@@ -219,6 +261,7 @@ def create_my_login_link(request: Request, body: MyLoginLink) -> LoginLinkReply:
     unused."""
     actor = actor_from(request)
     options = link_options(request, body)
+    options = key_login_link_options(request, options)
     credential, info = login_tokens.issue_login_link(get_store(request), actor.user.id, options)
     audit(request, KIND_AUTH, "own login link created", {"max_uses": info["max_uses"], "expires_at": info["expires_at"]})
     return LoginLinkReply(**link_reply(credential, info))

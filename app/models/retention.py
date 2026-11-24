@@ -117,6 +117,8 @@ def reapply(store: Store) -> int:
     preferences: dict[int, Preference] = {}
     changed = 0
     for key, record in store.all(BUCKET_FILES):
+        if record.get("keep"):
+            continue  # chosen on a tool screen, not by the policy
         user_id = record["user_id"]
         if user_id not in preferences:
             preferences[user_id] = get_preference(store, user_id)

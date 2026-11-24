@@ -23,6 +23,7 @@
 #   scripts/login.sh                                    owner's login link
 #   scripts/run.sh manage list-users
 #   scripts/run.sh manage create-login --name "Grace" --role user
+#   scripts/run.sh manage create-key --user-id 1 --name "CI"
 #   scripts/run.sh manage paths                         where the state lives
 #   scripts/run.sh config check
 #   scripts/run.sh config shell server                  every resolved value

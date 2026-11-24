@@ -248,6 +248,30 @@ def cancel_run(request: Request, body: RunIDPath) -> OkReply:
 
 
 @route(
+    "POST /api/runs/{run_id}/restart", summary="Start a cancelled or failed run again",
+    tag="Actions", feature="files", errors=(409,),
+    description="Queues the run again from the beginning, on the same file with the same options. A run that "
+    "is queued, running or done, or one whose PDF is gone, is a 409.",
+)
+def restart_run(request: Request, body: RunIDPath) -> RunRow:
+    store = get_store(request)
+    one = _mine(request, body.run_id)
+    if one is None:
+        raise Refused(404, NO_SUCH_RUN)
+    if one.state not in models.RESTARTABLE:
+        raise Refused(409, "only a cancelled or failed run can start again")
+    source = file_models.get_file(store, one.file_id)
+    if source is None or source.deleted or source.state != file_models.READY:
+        raise Refused(409, "the PDF it ran on is gone")
+    restarted = models.restart_run(store, one.id)
+    if restarted is None:
+        raise Refused(409, "only a cancelled or failed run can start again")
+    request.app.state.runner.restart(restarted.id)
+    audit(request, KIND_ADMIN, "run restarted", {"run_id": restarted.id})
+    return _run_row(request, restarted, [])
+
+
+@route(
     "POST /api/runs/{run_id}/delete", summary="Delete a run",
     tag="Actions", feature="files",
     description="The run and every file it made go to the bin, and can be restored for ten minutes. A run "
@@ -304,19 +328,21 @@ class _Sink:
         return data
 
 
-def zip_stream(cfg: Config, made: list[file_models.File]) -> Iterator[bytes]:
+def zip_stream(cfg: Config, made: list[file_models.File], folders: list[str] | None = None) -> Iterator[bytes]:
     """A zip of made, written as it is read: nothing is staged on disk or held
     in memory beyond one piece. Stored, not deflated: a PDF's streams are
-    compressed already, and deflating gigabytes again would only cost time."""
+    compressed already, and deflating gigabytes again would only cost time.
+    folders, one per file, puts each in a folder of that name."""
     sink = _Sink()
     used: set[str] = set()
     with zipfile.ZipFile(sink, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as archive:  # type: ignore[arg-type]
-        for file in made:
-            name = file.name
-            stem, suffix = PurePosixPath(name).stem, PurePosixPath(name).suffix
+        for index, file in enumerate(made):
+            folder = folders[index] if folders else ""
+            name = f"{folder}/{file.name}" if folder else file.name
+            stem, suffix = PurePosixPath(file.name).stem, PurePosixPath(file.name).suffix
             counter = 2
             while name.lower() in used:
-                name = f"{stem} ({counter}){suffix}"
+                name = f"{folder}/{stem} ({counter}){suffix}" if folder else f"{stem} ({counter}){suffix}"
                 counter += 1
             used.add(name.lower())
             info = zipfile.ZipInfo(name, date_time=file.created_at.timetuple()[:6])
@@ -347,6 +373,52 @@ async def download_run(request: Request, body: RunIDPath) -> Response:
     if request.method == "HEAD":
         return Response(media_type="application/zip", headers=headers)
     return StreamingResponse(zip_stream(get_config(request), made), media_type="application/zip", headers=headers)
+
+
+class RunIDs(RequestType):
+    ids: Annotated[str, QUERY, Meta(description="Your runs' ids, comma-separated, up to 1000.")] = ""
+
+
+@route(
+    "GET /api/runs/download", summary="Download everything several runs made",
+    tag="Actions", feature="files", reply_type="application/zip",
+    reply_description="One zip, a folder per run named after its PDF, always as an attachment",
+    description="What a tool screen offers once a batch is done. A run that is not yours, or made nothing, is "
+    "left out; none left is a 404.",
+)
+async def download_runs(request: Request, body: RunIDs) -> Response:
+    ids = list(dict.fromkeys(part for part in body.ids.split(",") if part))[:1000]
+
+    def gather() -> tuple[list[file_models.File], list[str]]:
+        store = get_store(request)
+        made: list[file_models.File] = []
+        folders: list[str] = []
+        taken: set[str] = set()
+        for run_id in ids:
+            one = _mine(request, run_id)
+            files = models.outputs_of(store, one) if one is not None else []
+            if not files:
+                continue
+            folder = PurePosixPath(one.file_name).stem or "sections"
+            base, counter = folder, 2
+            while folder.lower() in taken:
+                folder = f"{base} ({counter})"
+                counter += 1
+            taken.add(folder.lower())
+            made.extend(files)
+            folders.extend([folder] * len(files))
+        return made, folders
+
+    made, folders = await run(gather)
+    if not made:
+        raise Refused(404, "those runs made nothing to download")
+    several = len(set(folders)) > 1
+    name = f"PDFTools - {len(made)} files.zip" if several else f"{folders[0]} - sections.zip"
+    headers = {"Content-Disposition": content_disposition(name), "Cache-Control": "private, no-store"}
+    if request.method == "HEAD":
+        return Response(media_type="application/zip", headers=headers)
+    return StreamingResponse(zip_stream(get_config(request), made, folders if several else None),
+                             media_type="application/zip", headers=headers)
 
 
 @route(

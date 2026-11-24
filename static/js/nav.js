@@ -12,7 +12,8 @@
 // #two-factor) are turned into their path on load, so old bookmarks work.
 //
 // Whether a screen exists for this user is not decided here. The screen's own
-// file un-hides its section; Nav only offers what was un-hidden. So
+// file un-hides its section (Keys.init shows the All API keys screen, and only
+// if the server has them switched on); Nav only offers what was un-hidden. So
 // app.js calls Nav.init() last, once every screen has had its say.
 //
 // After every change of screen Nav sends a "nav" event on window, which is
@@ -26,6 +27,7 @@ const Nav = {
   // Old hash links to screens that are now cards on Account: hash -> card id.
   moved: {
     "two-factor": "two-factor-panel",
+    "api-keys": "api-keys-panel",
   },
 
   init() {

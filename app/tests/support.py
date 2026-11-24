@@ -13,6 +13,7 @@ from app.core import config, config_live, config_secret, layout, yaml_edit
 # A project's defaults.yaml says which features it chose. These tests are about
 # the features themselves, so they run on the template's choice whatever that was.
 TEMPLATE_SWITCHES = [
+    ("auth.api_keys", True),
     ("auth.two_factor", True),
     ("files.enabled", True),
 ]

@@ -241,7 +241,7 @@ const Library = {
     const digests = [];
     item.checked = 0;
     for ( let start = 0 ; start < file.size ; start += this.fingerprintPiece ) {
-      if ( this.cancelled ) throw new Error( "cancelled" );
+      if ( this.stopped( item ) ) throw new Error( "cancelled" );
       const piece = await file.slice( start , start + this.fingerprintPiece ).arrayBuffer();
       digests.push( new Uint8Array( await crypto.subtle.digest( "SHA-256" , piece ) ) );
       item.checked = Math.min( start + this.fingerprintPiece , file.size );
@@ -265,7 +265,7 @@ const Library = {
     this.paintItem( item );
     const file = item.file;
     const fingerprint = await this.fingerprint( item );
-    const asked = await Api.claimFile( file.name , file.size , file.type || "application/pdf" , item.folder , fingerprint );
+    const asked = await Api.claimFile( file.name , file.size , file.type || "application/pdf" , item.folder , fingerprint , item.keep );
     if ( !asked.found ) return false;
     const hashes = [];
     for ( const range of asked.ranges ) {
@@ -273,7 +273,7 @@ const Library = {
       hashes.push( this.hex( await crypto.subtle.digest( "SHA-256" , bytes ) ) );
     }
     try {
-      await Api.answerClaim( asked.claim_id , hashes );
+      item.id = ( await Api.answerClaim( asked.claim_id , hashes ) ).id;
     } catch ( error ) {
       // Refused (the file changed while it was read, or the claim ran out):
       // send it.
@@ -295,7 +295,7 @@ const Library = {
     if ( created ) {
       item.sent = ( created.chunks - created.missing.length ) * created.chunk_bytes;
     } else {
-      created = await Api.createFile( file.name , file.size , file.type || "application/pdf" , item.folder );
+      created = await Api.createFile( file.name , file.size , file.type || "application/pdf" , item.folder , item.keep );
       this.remember( item , created.id );
     }
     item.id = created.id;
@@ -319,7 +319,7 @@ const Library = {
     } catch ( error ) {
       // Cancelled: it would hold its share of the quota until the sweep. A
       // failure keeps its pieces, so dropping the file again resumes it.
-      if ( this.cancelled ) {
+      if ( this.stopped( item ) ) {
         await Api.deleteFile( created.id ).catch( () => {} );
         this.remember( item , null );
       }
@@ -331,9 +331,9 @@ const Library = {
     const pending = missing.slice();
     const worker = async () => {
       while ( pending.length > 0 ) {
-        if ( this.cancelled ) throw new Error( "cancelled" );
+        if ( this.stopped( item ) ) throw new Error( "cancelled" );
         const index = pending.shift();
-        await this.sendPiece( created , item.file , index );
+        await this.sendPiece( created , item , index );
         const start = index * created.chunk_bytes;
         item.sent += Math.min( created.chunk_bytes , item.file.size - start );
         this.paintItem( item );
@@ -343,14 +343,15 @@ const Library = {
     await Promise.all( Array.from( { length: Math.min( this.pieceWorkers , Math.max( pending.length , 1 ) ) } , worker ) );
   },
 
-  async sendPiece( created , file , index ) {
+  async sendPiece( created , item , index ) {
+    const file = item.file;
     const start = index * created.chunk_bytes;
     const piece = file.slice( start , start + created.chunk_bytes );
     for ( let attempt = 1 ; ; attempt++ ) {
       try {
         return await Api.sendFileChunk( created.id , index , piece );
       } catch ( error ) {
-        if ( this.cancelled ) throw error;
+        if ( this.stopped( item ) ) throw error;
         // No status is the network; 409 is the same piece already being
         // written by a retry of ours, which a moment later will be there.
         const passing = !error.status || error.status === 409 || error.status === 429 || error.status >= 500;
@@ -374,7 +375,17 @@ const Library = {
     return { element , status , bar };
   },
 
+  // An upload is stopped by the import queue's Stop, or, for one a tool
+  // screen started (js/local.js), by its own.
+  stopped( item ) {
+    return item.tool ? Boolean( item.cancelled ) : this.cancelled;
+  },
+
   paintItem( item ) {
+    if ( item.onPaint ) {
+      item.onPaint( item );
+      return;
+    }
     const checking = item.state === "checking";
     const reached = checking ? ( item.checked || 0 ) : item.sent;
     item.row.bar.value = item.state === "done" ? item.file.size : reached;

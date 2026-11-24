@@ -58,6 +58,27 @@ def print_login_link(cfg: Config, label: str, credential: str, info: dict) -> No
     print("\n".join(lines), flush=True)
 
 
+def print_api_key(cfg: Config, label: str, credential: str, expires: str) -> None:
+    """The one moment an API key is ever visible. Unlike a login link this is
+    a complete credential, not a URL; the example request uses the same
+    address the links do."""
+    lines = [
+        RULE,
+        f"  API KEY -- {label}",
+        RULE,
+        f"  {credential}",
+        RULE,
+        f"  Expires: {expires}",
+        "  Send it as a header:",
+        f'    curl -H "Authorization: Bearer {credential}" {cfg.url}/api/me',
+        _link_note(cfg),
+        "  It is not stored anywhere and cannot be shown again. If it leaks,",
+        "  revoke it: python -m app manage revoke-key --key-id <id>",
+        RULE,
+    ]
+    print("\n".join(lines), flush=True)
+
+
 def _link_note(cfg: Config) -> str:
     """Where the address in a printed link came from, so a link built from
     127.0.0.1 is not mistaken for one other people can open."""

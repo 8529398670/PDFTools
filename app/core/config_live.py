@@ -146,7 +146,9 @@ def live_config(boot: Config, boot_file: config.File, file: config.File) -> Conf
         session_max_age_seconds=file.auth.session_max_age_seconds,
         login_token_ttl_seconds=file.auth.login_token_ttl_seconds,
         multi_use_login_token_ttl_seconds=file.auth.multi_use_login_token_ttl_seconds,
+        api_keys_enabled=file.auth.api_keys,
         two_factor_enabled=file.auth.two_factor,
+        api_key_ttl_seconds=file.auth.api_key_ttl_seconds,
         logs=replace(
             boot.logs,
             retention_days=file.logs.retention_days,

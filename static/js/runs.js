@@ -155,6 +155,14 @@ const Runs = {
       text: I18n.get( "ui.cancel" ),
       on: { click: () => this.cancel( one ) },
     } ) : null;
+    const restart = [ "cancelled" , "failed" ].includes( one.state ) ? Dom.el( "button" , {
+      class: "btn btn-sm btn-outline-primary",
+      children: [
+        Dom.el( "i" , { class: "bi bi-arrow-clockwise me-1" , attrs: { "aria-hidden": "true" } } ),
+        Dom.el( "span" , { text: I18n.get( "runs.restart_button" ) } ),
+      ],
+      on: { click: () => this.restart( one ) },
+    } ) : null;
     const remove = Dom.el( "button" , {
       class: "btn btn-sm btn-outline-danger",
       text: I18n.get( "runs.delete_button" ),
@@ -169,7 +177,7 @@ const Runs = {
       Dom.el( "td" , { class: "runs-state" , children: this.stateCell( one ) } ),
       Dom.el( "td" , { class: "text-nowrap" , text: made } ),
       Dom.el( "td" , { class: "text-nowrap" , children: [ Dom.when( one.created_at ) ] } ),
-      Dom.el( "td" , { class: "text-nowrap" , children: [ Dom.rowActions( one.file_name , [ zip , toggle , cancel , remove ] , 2 ) ] } ),
+      Dom.el( "td" , { class: "text-nowrap" , children: [ Dom.rowActions( one.file_name , [ zip , restart , toggle , cancel , remove ] , 2 ) ] } ),
     ] } );
   },
 
@@ -199,6 +207,15 @@ const Runs = {
   async cancel( one ) {
     try {
       await Api.cancelRun( one.id );
+    } catch ( error ) {
+      App.showError( error.message );
+    }
+    await this.refresh();
+  },
+
+  async restart( one ) {
+    try {
+      await Api.restartRun( one.id );
     } catch ( error ) {
       App.showError( error.message );
     }

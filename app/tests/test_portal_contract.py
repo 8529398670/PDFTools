@@ -8,6 +8,7 @@ from datetime import timedelta
 from app.core.db import BUCKET_SESSIONS, BUCKET_USERS
 from app.models import credentials, login_tokens, to_iso, users, utc_now
 from app.models.sign_in import SignInRules
+from app.models import api_keys
 from app.tests.route_support import RoutesTestCase
 
 
@@ -17,6 +18,10 @@ class Discovery(RoutesTestCase):
         self.assertEqual(me["contract"], 3)
         self.assertIn("viewer_role", me["capabilities"])
         self.assertIn("account_expiry", me["capabilities"])
+        self.set_config(api_keys_enabled=True)
+        _, me = self.call("GET", "/api/me", cookie=self.user_cookie)
+        self.assertIn("key_minting", me["capabilities"])
+        self.assertIn("key_sign_in", me["capabilities"])
 
 
 class MeSaysWhichTemplateItCameFrom(RoutesTestCase):
@@ -60,8 +65,61 @@ class MeSaysWhatThisCallerMayDo(RoutesTestCase):
         _, me = self.call("GET", "/api/me", cookie=self.user_cookie)
         self.assertEqual((me["owner"], me["kind"]), (False, "person"))
 
+    def test_a_key_says_its_grants_and_expiry(self) -> None:
+        self.set_config(api_keys_enabled=True)
+        credential, key = api_keys.issue_api_key(self.store, self.owner.id, "portal", users.ROLE_ADMIN, 12 * 24 * 3600)
+        _, me = self.call("GET", "/api/me", key=credential)
+        self.assertEqual((me["owner"], me["kind"]), (True, "person"))
+        self.assertEqual(me["key"], {"id": key.id, "name": "portal", "role": "admin", "may_mint_keys": False, "may_sign_in": False, "expires_at": to_iso(key.expires_at)})
+        self.assertIn("key_grants", me["capabilities"])
+
+    def test_a_key_that_never_expires_leaves_expires_at_out(self) -> None:
+        credential, _ = api_keys.issue_api_key(self.store, self.user.id, "cron", users.ROLE_USER, 0)
+        _, me = self.call("GET", "/api/me", key=credential)
+        self.assertFalse(me["owner"])
+        self.assertNotIn("expires_at", me["key"])
 
 
+class AnyAdminRunsAccounts(RoutesTestCase):
+    """The portal works through an admin account of its own, never the
+    owner's (portal contract v3, item 1). Every account route lets any admin
+    run an ordinary account, and keeps to the ladder: nobody acts on the
+    owner's account, and only the owner acts on another admin's."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.portal_user = users.create_user(self.store, "ProjectPortal", users.ROLE_ADMIN)
+        self.portal, _ = api_keys.issue_api_key(self.store, self.portal_user.id, "portal", users.ROLE_ADMIN, 3600)
+
+    def test_a_second_admin_runs_an_ordinary_account(self) -> None:
+        status, reply = self.call("POST", "/api/admin/users", key=self.portal, body={"display_name": "Cy", "role": "user", "max_uses": 1, "expires_in_minutes": 15})
+        self.assertEqual(status, 201, reply)
+        cy = f"/api/admin/users/{reply['user_id']}"
+        self.assertEqual(self.call("GET", "/api/admin/users?limit=1", key=self.portal)[0], 200)
+        soon = to_iso(utc_now() + timedelta(hours=1))
+        for action, body in (
+            ("reissue-login", {"max_uses": 1, "expires_in_minutes": 15}), ("role", {"role": "viewer"}),
+            ("expiry", {"expires_at": soon}), ("disabled", {"disabled": True}), ("disabled", {"disabled": False}),
+            ("revoke-access", {}), ("delete", {}),
+        ):
+            status, reply = self.call("POST", f"{cy}/{action}", key=self.portal, body=body)
+            self.assertEqual(status, 200, f"{action}: {reply}")
+        cookie = self.session(self.portal_user.id)
+        self.assertEqual(self.call("GET", f"/api/admin/users/{self.user.id}/keys", cookie=cookie)[0], 200)
+
+    def test_the_ladder_holds_on_the_owner_and_another_admin(self) -> None:
+        cookie = self.session(self.portal_user.id)
+        soon = to_iso(utc_now() + timedelta(hours=1))
+        for target in (self.owner, self.admin):
+            path = f"/api/admin/users/{target.id}"
+            status, reply = self.call("GET", f"{path}/keys", cookie=cookie)
+            self.assertEqual(status, 403, f"listing {target.display_name}'s keys: {reply}")
+            for action, body in (
+                ("reissue-login", {"max_uses": 1, "expires_in_minutes": 15}), ("role", {"role": "user"}),
+                ("expiry", {"expires_at": soon}), ("disabled", {"disabled": True}), ("revoke-access", {}), ("delete", {}),
+            ):
+                status, reply = self.call("POST", f"{path}/{action}", key=self.portal, body=body)
+                self.assertEqual(status, 403, f"{action} on {target.display_name}: {reply}")
 
 
 class ViewerRole(RoutesTestCase):
@@ -94,6 +152,15 @@ class ViewerRole(RoutesTestCase):
         self.assertEqual(self.call("POST", "/api/account/rename", cookie=self.user_cookie,
                                    body={"csrf_token": self.csrf(self.user_cookie), "display_name": "x"}), (403, {"error": "view_only", "code": "view_only"}))
 
+    def test_a_viewer_key_and_a_viewer_accounts_admin_key_both_view_only(self) -> None:
+        self.set_config(api_keys_enabled=True)
+        scoped, _ = api_keys.issue_api_key(self.store, self.owner.id, "look", users.ROLE_VIEWER, 3600)
+        _, me = self.call("GET", "/api/me", key=scoped)
+        self.assertEqual(me["role"], "viewer")
+        self.assertEqual(self.call("POST", "/api/account/rename", key=scoped, body={"display_name": "x"}), (403, {"error": "view_only", "code": "view_only"}))
+        # A key never outranks its account: the viewer cannot mint a user key.
+        with self.assertRaises(api_keys.APIKeyRoleError):
+            api_keys.issue_api_key(self.store, self.viewer.id, "more", users.ROLE_USER, 3600)
 
 
 class AccountExpiry(RoutesTestCase):
@@ -143,11 +210,13 @@ class AccountExpiry(RoutesTestCase):
         self.assertIsNone(login_tokens.redeem_login_token(self.store, link, SignInRules(3600)))
 
     def test_housekeeping_disables_and_revokes(self) -> None:
+        key, _ = api_keys.issue_api_key(self.store, self.user.id, "bot", users.ROLE_USER, 3600)
         self.past(self.user.id)
         self.assertEqual(credentials.expire_due_accounts(self.store), 1)
         user = users.get_user(self.store, self.user.id)
         self.assertIsNotNone(user.disabled_at)
         self.assertFalse([r for _, r in self.store.all(BUCKET_SESSIONS) if r["user_id"] == self.user.id])
+        self.assertTrue(api_keys.get_api_key(self.store, key.split(".")[0]).revoked)
         # Twice is a no-op, and the owner is never touched.
         self.assertEqual(credentials.expire_due_accounts(self.store), 0)
 

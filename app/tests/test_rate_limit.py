@@ -64,7 +64,7 @@ class BudgetTest(unittest.TestCase):
             ("POST", "/api/files/abc/chunks/1"): BUDGET_UPLOAD,
             ("POST", "/API/Files/abc/chunks/1/"): BUDGET_UPLOAD,
             ("GET", "/api/files/abc/chunks/1"): BUDGET_GENERAL,
-            ("POST", "/api/files/abc/finish"): BUDGET_GENERAL,
+            ("POST", "/api/files/abc/finish"): BUDGET_UPLOAD,  # a dropped folder is many finishes
             ("POST", "/api/files/abc/chunks"): BUDGET_GENERAL,
             ("GET", "/api/login/options"): BUDGET_GENERAL,
             ("POST", "/js/app.js"): BUDGET_GENERAL,

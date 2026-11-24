@@ -90,6 +90,14 @@ class Runner:
             runs.update(self.store, run_id, state=runs.CANCELLED, finished_at=utc_now())
             self.publish(EVENT_RUNS)
 
+    def restart(self, run_id: str) -> None:
+        """Queue again a run that runs.restart_run has put back to queued: a
+        cancel asked of it before must not stop it this time."""
+        with self._lock:
+            self._cancelled.discard(run_id)
+        self.submit(run_id)
+        self.publish(EVENT_RUNS)
+
     def publish(self, message: bytes) -> None:
         if self.loop is not None:
             sse.publish_from_thread(self.loop, self.hub, message)
@@ -174,6 +182,10 @@ class Runner:
             return
         run = runs.get_run(self.store, run_id)
         if run is None or run.deleted or run.state in runs.FINISHED:
+            # Cancelled while queued: the cancel is spent, or it would stop
+            # the run again if it is restarted.
+            with self._lock:
+                self._cancelled.discard(run_id)
             return
         cfg = self.settings.get()
         work = files.work_dir(cfg) / f"run-{run.id}"
@@ -253,6 +265,19 @@ class Runner:
             self._fail(run, "internal")
             return
         runs.update(self.store, run.id, state=runs.DONE, progress=1.0, step="", result=result, finished_at=utc_now())
+        self._drop_used_upload(run.file_id)
+
+    def _drop_used_upload(self, file_id: str) -> None:
+        """An upload its owner chose to keep only for the run (files.KEEP_RUN)
+        goes to the bin once a run on it is done, unless another run on it is
+        still to come. A cancelled or failed run leaves it, so it can be
+        restarted; it expires in a day anyway."""
+        source = files.get_file(self.store, file_id)
+        if source is None or source.deleted or source.keep != files.KEEP_RUN:
+            return
+        if any(other.file_id == file_id for other in runs.unfinished(self.store)):
+            return
+        files.delete_file(self.store, file_id, source.user_id)
 
     def _fail(self, run: runs.Run, code: str) -> None:
         current = runs.get_run(self.store, run.id)

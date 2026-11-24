@@ -163,6 +163,8 @@ class AuthSection:
     session_max_age_seconds: int
     login_token_ttl_seconds: int
     multi_use_login_token_ttl_seconds: int
+    api_keys: bool
+    api_key_ttl_seconds: int
     two_factor: bool
 
 
@@ -342,6 +344,14 @@ class Config:
     # login_tokens.resolve_link).
     multi_use_login_token_ttl_seconds: int
 
+    # Whether the Authorization: Bearer header is believed at all, and whether
+    # the endpoints that mint keys exist. Off stops existing keys from
+    # authenticating too -- the rows stay, so switching it back on restores
+    # them.
+    api_keys_enabled: bool
+    # How long a new key lasts when the request does not say. Bounded so a
+    # forgotten key eventually stops being a live credential.
+    api_key_ttl_seconds: int
 
     # Whether 2FA is offered and asked for. Off keeps the secrets, the same way.
     two_factor_enabled: bool
@@ -803,6 +813,7 @@ def validate(file: File) -> list[str]:
     )
     check(auth.login_token_ttl_seconds > 0, "auth.login_token_ttl_seconds must be positive")
     check(auth.multi_use_login_token_ttl_seconds > 0, "auth.multi_use_login_token_ttl_seconds must be positive")
+    check(auth.api_key_ttl_seconds > 0, "auth.api_key_ttl_seconds must be positive")
 
     logs = file.logs
     check(1 <= logs.retention_days <= 3650, f"logs.retention_days must be 1-3650, got {logs.retention_days}")
@@ -1037,7 +1048,9 @@ def build_config(file: File, path: Path, paths: "Paths", secret_key: str) -> Con
         session_max_age_seconds=file.auth.session_max_age_seconds,
         login_token_ttl_seconds=file.auth.login_token_ttl_seconds,
         multi_use_login_token_ttl_seconds=file.auth.multi_use_login_token_ttl_seconds,
+        api_keys_enabled=file.auth.api_keys,
         two_factor_enabled=file.auth.two_factor,
+        api_key_ttl_seconds=file.auth.api_key_ttl_seconds,
         secret_key=secret_key,
         encrypt_at_rest=file.server.encrypt_at_rest,
         rate_limit_max=file.server.rate_limit_max,

@@ -10,6 +10,7 @@ from typing import Callable
 from app.core import config_live, db, logs
 from app.core.jobs import Registry
 from app.models import credentials, login_tokens, sessions
+from app.models import api_keys
 from app.models import files, retention, runs
 from app.models import sign_in
 
@@ -33,6 +34,7 @@ def purge(store: db.Store) -> tuple[str, str]:
         ("expired accounts", credentials.expire_due_accounts),
         ("sessions", sessions.purge_expired_sessions),
         ("login tokens", login_tokens.purge_expired_login_tokens),
+        ("api keys", api_keys.purge_dead_api_keys),
         ("sign-in challenges", sign_in.purge_expired_challenges),
     )
     removed: list[str] = []

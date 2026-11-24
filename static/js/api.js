@@ -141,6 +141,46 @@ const Api = {
   deleteUser( userId )         { return this.post( "/api/admin/users/" + userId + "/delete" ); },
   resetTwoFactor( userId )     { return this.post( "/api/admin/users/" + userId + "/reset-two-factor" ); },
 
+  // API keys. createKey's expiresInDays is passed through as-is including null,
+  // because the server reads absent as "use the default" and 0 as "never
+  // expires" -- collapsing them here would lose the distinction.
+  listKeys( offset , params )  { return this.request( "/api/keys" + this.query( { offset: offset , ...params } ) ); },
+  createKey( name , role , expiresInDays ) {
+    return this.post( "/api/keys" , { name: name , role: role , expires_in_days: expiresInDays } );
+  },
+  // expect is the name it is replacing: see Undo in the frontend reference.
+  renameKey( keyId , name , expect ) {
+    return this.post( "/api/keys/" + encodeURIComponent( keyId ) + "/rename" , { name: name , expect: expect } );
+  },
+  setKeyExpiry( keyId , days ) {
+    return this.post( "/api/keys/" + encodeURIComponent( keyId ) + "/expiry" , { expires_in_days: days } );
+  },
+  // Whether one of your own keys may make a login link for your account.
+  setKeySignIn( keyId , on ) {
+    return this.post( "/api/keys/" + encodeURIComponent( keyId ) + "/sign-in" , { may_sign_in: on } );
+  },
+  // Whether one of the owner's own admin keys may mint keys for other
+  // accounts (an outside admin tool such as ProjectPortal). Owner only.
+  setKeyMintKeys( keyId , on ) {
+    return this.post( "/api/keys/" + encodeURIComponent( keyId ) + "/mint-keys" , { may_mint_keys: on } );
+  },
+  revokeKey( keyId )           { return this.post( "/api/keys/" + encodeURIComponent( keyId ) + "/revoke" ); },
+  deleteKey( keyId )           { return this.post( "/api/keys/" + encodeURIComponent( keyId ) + "/delete" ); },
+  restoreKey( keyId )          { return this.post( "/api/keys/" + encodeURIComponent( keyId ) + "/restore" ); },
+  listAllKeys( offset , params ) { return this.request( "/api/admin/keys" + this.query( { offset: offset , ...params } ) ); },
+  createKeyFor( userId , name , role , expiresInDays ) {
+    return this.post( "/api/admin/keys" , { user_id: userId , name: name , role: role , expires_in_days: expiresInDays } );
+  },
+  renameAnyKey( keyId , name , expect ) {
+    return this.post( "/api/admin/keys/" + encodeURIComponent( keyId ) + "/rename" , { name: name , expect: expect } );
+  },
+  setAnyKeyExpiry( keyId , days ) {
+    return this.post( "/api/admin/keys/" + encodeURIComponent( keyId ) + "/expiry" , { expires_in_days: days } );
+  },
+  revokeAnyKey( keyId )        { return this.post( "/api/admin/keys/" + encodeURIComponent( keyId ) + "/revoke" ); },
+  deleteAnyKey( keyId )        { return this.post( "/api/admin/keys/" + encodeURIComponent( keyId ) + "/delete" ); },
+  restoreAnyKey( keyId )       { return this.post( "/api/admin/keys/" + encodeURIComponent( keyId ) + "/restore" ); },
+
   // The activity log (owner only; the server answers anyone else with 404).
   // q is the search box as typed; the server parses it.
   logDays( query ) {
@@ -163,9 +203,9 @@ const Api = {
   allFiles( offset , params )  { return this.request( "/api/admin/files" + this.query( { offset: offset , ...params } ) ); },
   storage()                    { return this.request( "/api/account/storage" ); },
   allStorage()                 { return this.request( "/api/admin/storage" ); },
-  createFile( name , size , type , folder ) { return this.post( "/api/files" , { name: name , size: size , type: type , folder: folder || "" } ); },
+  createFile( name , size , type , folder , keep ) { return this.post( "/api/files" , { name: name , size: size , type: type , folder: folder || "" , keep: keep || "" } ); },
   // Whether the server already has this content; if so, the ranges to hash. See library.js.
-  claimFile( name , size , type , folder , fingerprint ) { return this.post( "/api/claims" , { name: name , size: size , type: type , folder: folder || "" , fingerprint: fingerprint } ); },
+  claimFile( name , size , type , folder , fingerprint , keep ) { return this.post( "/api/claims" , { name: name , size: size , type: type , folder: folder || "" , fingerprint: fingerprint , keep: keep || "" } ); },
   answerClaim( id , hashes )   { return this.post( "/api/claims/" + encodeURIComponent( id ) , { hashes: hashes } ); },
   file( id )                   { return this.request( "/api/files/" + encodeURIComponent( id ) ); },
   sendFileChunk( id , index , piece ) {
@@ -200,9 +240,11 @@ const Api = {
   runs( offset , params )      { return this.request( "/api/runs" + this.query( { offset: offset , ...params } ) ); },
   run( id )                    { return this.request( "/api/runs/" + encodeURIComponent( id ) ); },
   cancelRun( id )              { return this.post( "/api/runs/" + encodeURIComponent( id ) + "/cancel" ); },
+  restartRun( id )             { return this.post( "/api/runs/" + encodeURIComponent( id ) + "/restart" ); },
   deleteRun( id )              { return this.post( "/api/runs/" + encodeURIComponent( id ) + "/delete" ); },
   restoreRun( id )             { return this.post( "/api/runs/" + encodeURIComponent( id ) + "/restore" ); },
   runDownloadPath( id )        { return "/api/runs/" + encodeURIComponent( id ) + "/download"; },
+  runsDownloadPath( ids )      { return "/api/runs/download?ids=" + ids.map( encodeURIComponent ).join( "," ); },
   workStreamPath()             { return "/api/runs/stream"; },
   myRetention()                { return this.request( "/api/account/retention" ); },
   setMyRetention( values )     { return this.post( "/api/account/retention" , values ); },
