@@ -519,6 +519,52 @@ split:
   started: "Started {count} splits."
   see_runs: "See runs"
 
+# Split on this device: the Library card that splits with qpdf as WebAssembly,
+# on files that are never uploaded (static/js/local.js).
+local:
+  heading: "Split on this device"
+  description: "The PDF never leaves this device: nothing is uploaded, and the sections are saved straight from here. Books of several GB are fine; only one section at a time is held in memory."
+  engine_label: "Where splits run"
+  engine_auto: "Automatic"
+  engine_device: "This device"
+  engine_server: "The server"
+  # What Automatic chose, and why. {cores} and {memory} are this device's.
+  auto_device: "Automatic picks this device ({cores} cores{memory})."
+  auto_server: "Automatic picks the server: this device has {cores} cores{memory}, and splitting here wants at least 4 cores and 4 GB."
+  memory: ", {gb} GB"
+  device_help: "Splits run in this browser."
+  server_help: "PDFs you pick here are imported into your library; split them from the list once they have been read."
+  unsupported: "This browser cannot split on this device, so splits run on the server."
+  pick_device: "Split PDFs on this device"
+  pick_server: "Import PDFs to split on the server"
+  imported_for_server: "Importing {count}. Split them from the list once they have been read."
+  reading: "Reading"
+  waiting: "Waiting"
+  # {percent} done, on {name}: the section being written.
+  splitting: "{percent}% · {name}"
+  done: "{count} sections · {size}"
+  folded: "Folded into the section starting on the same page: {count}."
+  nowhere: "Bookmarks that point nowhere, left out: {count}."
+  show_sections: "Sections"
+  no_bookmarks: "No bookmarks to split at"
+  failed: "Failed: {reason}"
+  cancelled: "Cancelled"
+  summary_running: "Splitting {done} of {count} on this device"
+  summary_finished: "Split {done} of {count} on this device"
+  cancel: "Stop"
+  download_all: "Download all"
+  save_folder: "Save all to a folder"
+  saved_folder: "Saved {count} files to {folder}."
+  download: "Download"
+  errors:
+    not_pdf: "Not a PDF"
+    password: "Needs a password"
+    damaged: "Cannot be read"
+    no_bookmarks: "No bookmarks to split at"
+    qpdf_failed: "qpdf could not write a section"
+    memory: "This device ran out of memory. Try the server instead."
+    failed: "Something went wrong"
+
 # What each action is called; see app/actions/.
 actions:
   split_bookmarks:

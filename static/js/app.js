@@ -188,6 +188,7 @@ const App = {
     const loading = [];
     loading.push( Sessions.init() );
     loading.push( Library.init( me ) );
+    Local.init( me );
     loading.push( Runs.init( me ) );
     loading.push( Retention.init( me ) );
     About.init( me );

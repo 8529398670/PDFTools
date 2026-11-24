@@ -56,6 +56,8 @@ mimetypes.add_type("application/yaml", ".yaml")
 mimetypes.add_type("application/yaml", ".yml")
 mimetypes.add_type("font/woff2", ".woff2")
 mimetypes.add_type("font/woff", ".woff")
+# WebAssembly is only compiled while it streams in when served as this type.
+mimetypes.add_type("application/wasm", ".wasm")
 
 
 def has_dot_dot(request_path: str) -> bool:

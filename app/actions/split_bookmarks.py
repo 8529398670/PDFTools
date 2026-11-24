@@ -183,8 +183,11 @@ def _drop_outside_links(part: pikepdf.Pdf) -> None:
                 action = annot.get("/A")
                 if target is None and isinstance(action, pikepdf.Dictionary) and action.get("/S") == pikepdf.Name.GoTo:
                     target = action.get("/D")
-                if isinstance(target, pikepdf.Array) and len(target) and isinstance(target[0], pikepdf.Dictionary):
-                    if target[0].objgen not in inside:
+                # qpdf turns a page it did not copy into null, so a target
+                # that is null, or a page not in this section, goes.
+                if isinstance(target, pikepdf.Array) and len(target):
+                    first = target[0]
+                    if first is None or (isinstance(first, pikepdf.Dictionary) and first.objgen not in inside):
                         continue
             keep.append(annot)
         if len(keep) != len(annots):

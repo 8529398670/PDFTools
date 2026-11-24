@@ -14,6 +14,17 @@ An action is:
   the page words with language.yaml (actions.<name>.result).
 
 Its labels and help live in language.yaml under actions.<name>.
+
+Each action also gets a browser twin, written after the server version: the
+same work done in the page with qpdf compiled to WebAssembly
+(static/vendor/qpdf/, built by scripts/build_qpdf_wasm.sh), so a file can be
+handled without ever being uploaded. The twin is static/js/local/<name>.js, a
+port of the module here that runs in static/js/local/worker.js (the source
+read lazily through WORKERFS, the results written straight to the origin's
+private disk through OpfsFS), and the Library's "on this device" card
+(static/js/local.js) runs it where the device is up to it, or wherever the
+person chose. A check runs both on the same PDFs and compares what they make:
+scripts/check_local_split.py for split_bookmarks, run by the tests.
 """
 from __future__ import annotations
 

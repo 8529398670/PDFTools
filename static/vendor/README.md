@@ -38,9 +38,10 @@ Commit what lands here. It is part of the app, not a build artifact.
 | `qrcode.js` | qrcode-generator 1.4.4 (MIT), for the two-factor setup screen |
 | `marked/marked.min.js` | marked 15.0.12 (MIT): Markdown to HTML for the /docs pages |
 | `dompurify/purify.min.js` | DOMPurify 3.2.6: sanitises that HTML before it touches the page |
+| `qpdf/qpdf.js`, `qpdf/qpdf.wasm` | qpdf 12.3.2 (Apache-2.0) as WebAssembly, for the actions that run in the browser (`js/local/`). Built here, not downloaded: `scripts/build_qpdf_wasm.sh` (needs Emscripten). `qpdf/VERSION` says which. |
 
 The icon stylesheet loads its font from `fonts/` next to it, so keep that
-layout. To upgrade, delete these files and fetch the new version:
+layout. qpdf is rebuilt, not fetched: `scripts/build_qpdf_wasm.sh [version]`. To upgrade, delete these files and fetch the new version:
 
 ```bash
 misc/vendor.sh https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.8/css/bootstrap.min.css

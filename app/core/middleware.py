@@ -46,7 +46,10 @@ IPNetwork = Union[ipaddress.IPv4Network, ipaddress.IPv6Network]
 CONTENT_SECURITY_POLICY = "; ".join(
     [
         "default-src 'self'",
-        "script-src 'self'",
+        # 'wasm-unsafe-eval' lets the page compile WebAssembly (qpdf, for the
+        # actions that run in the browser: static/js/local/). It allows
+        # nothing else: no eval(), no inline script.
+        "script-src 'self' 'wasm-unsafe-eval'",
         "style-src 'self'",
         "img-src 'self' data:",
         "font-src 'self'",

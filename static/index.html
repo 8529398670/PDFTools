@@ -380,6 +380,44 @@
             </div>
           </section>
 
+          <!-- Split on this device: qpdf as WebAssembly, on files that are never
+               uploaded. Where splits run is this device's own choice. See
+               js/local.js. -->
+          <section id="local-card" class="card" hidden>
+            <div class="card-body">
+              <h3 class="card-title" data-i18n="local.heading"></h3>
+              <p class="text-body-secondary" data-i18n="local.description"></p>
+              <div class="row g-2 align-items-start">
+                <div class="col-12 col-md-6 col-lg-5">
+                  <label for="local-engine" class="form-label" data-i18n="local.engine_label"></label>
+                  <select id="local-engine" class="form-select" aria-describedby="local-engine-help">
+                    <option value="auto" data-i18n="local.engine_auto"></option>
+                    <option value="device" data-i18n="local.engine_device"></option>
+                    <option value="server" data-i18n="local.engine_server"></option>
+                  </select>
+                  <div id="local-engine-help" class="form-text"></div>
+                </div>
+                <div class="col-12 col-md-auto align-self-md-center">
+                  <button id="local-pick-button" type="button" class="btn btn-primary w-100"><i id="local-pick-icon" class="bi bi-cpu me-1" aria-hidden="true"></i><span id="local-pick-text"></span></button>
+                  <input id="local-pick" class="visually-hidden" type="file" accept=".pdf,application/pdf" multiple tabindex="-1" aria-hidden="true" />
+                </div>
+              </div>
+              <div id="local-batch" class="mt-3" hidden>
+                <div class="row g-2 align-items-center mb-2">
+                  <div class="col-12 col-md">
+                    <span id="local-summary" class="small text-body-secondary" aria-live="polite"></span>
+                  </div>
+                  <div class="col-12 col-md-auto row-actions">
+                    <button id="local-cancel" type="button" class="btn btn-sm btn-outline-secondary" data-i18n="local.cancel" hidden></button>
+                    <button id="local-save-folder" type="button" class="btn btn-sm btn-outline-primary" hidden><i class="bi bi-folder-symlink me-1" aria-hidden="true"></i><span data-i18n="local.save_folder"></span></button>
+                    <button id="local-download-all" type="button" class="btn btn-sm btn-primary" hidden><i class="bi bi-download me-1" aria-hidden="true"></i><span data-i18n="local.download_all"></span></button>
+                  </div>
+                </div>
+                <ul id="local-list" class="list-group list-group-flush small"></ul>
+              </div>
+            </div>
+          </section>
+
           <section class="card">
             <div class="card-body">
               <h3 class="card-title" data-i18n="library.list_heading"></h3>
@@ -842,6 +880,7 @@
   <script src="/js/pager.js"></script>
   <script src="/js/sessions.js"></script>
   <script src="/js/library.js"></script>
+  <script src="/js/local.js"></script>
   <script src="/js/runs.js"></script>
   <script src="/js/retention.js"></script>
   <script src="/js/about.js"></script>
