@@ -852,7 +852,8 @@ const Local = {
     const note = Dom.el( "div" , { class: "text-body-secondary" } );
     const list = Dom.el( "ul" , { class: "list-unstyled mb-0 mt-1" } );
     const summary = Dom.el( "summary" , { class: "text-body-secondary" } );
-    const details = Dom.el( "details" , { class: "mt-1" , children: [ summary , list ] } );
+    // Open from the start: what a run made is what you came for.
+    const details = Dom.el( "details" , { class: "mt-1" , attrs: { open: "" } , children: [ summary , list ] } );
     // Remove watermarks' findings, to pick from (js/watermarks.js).
     const findings = Dom.el( "div" );
     const element = Dom.el( "li" , { class: "list-group-item px-0" , children: [
@@ -877,7 +878,7 @@ const Local = {
       waiting: I18n.get( "local.waiting" ),
       splitting: I18n.get( "local.splitting" ).replace( "{percent}" , percent ).replace( "{name}" , job.name || job.file.name ),
       done: job.result && job.result.mode === "check" ? I18n.get( "local.checked" )
-        : I18n.get( "local.done" ).replace( "{count}" , job.outputs.length ).replace( "{size}" , Files.size( size ) ),
+        : I18n.get( job.outputs.length === 1 ? "local.done_one" : "local.done" ).replace( "{count}" , job.outputs.length ).replace( "{size}" , Files.size( size ) ),
       failed: I18n.get( "local.failed" ).replace( "{reason}" , I18n.get( "local.errors." + job.reason ) || job.reason ),
       cancelled: I18n.get( "local.cancelled" ),
     };
@@ -918,10 +919,16 @@ const Local = {
         : output.meta.first_page === output.meta.last_page
           ? String( output.meta.first_page )
           : output.meta.first_page + "–" + output.meta.last_page;
-      row.list.appendChild( Dom.el( "li" , { class: "d-flex flex-wrap align-items-baseline gap-2 py-1 border-bottom" , children: [
-        Dom.el( "i" , { class: "bi bi-file-earmark-pdf text-body-secondary" , attrs: { "aria-hidden": "true" } } ),
-        PdfLinks.link( Dom.el( "a" , { class: "text-break flex-grow-1" , text: output.name } ) , output.view || output.url , output.url , output.name ),
-        Dom.el( "span" , { class: "text-body-secondary text-nowrap" , text: pages + " · " + Files.size( output.size ) } ),
+      const view = output.view || output.url;
+      row.list.appendChild( Dom.el( "li" , { class: "row g-2 align-items-center mx-0 py-2 border-bottom" , children: [
+        Dom.el( "div" , { class: "col-12 col-md d-flex gap-2 ps-0" , children: [
+          Dom.el( "i" , { class: "bi bi-file-earmark-pdf text-body-secondary" , attrs: { "aria-hidden": "true" } } ),
+          PdfLinks.link( Dom.el( "a" , { class: "text-break" , text: output.name } ) , view , output.url , output.name ),
+        ] } ),
+        Dom.el( "div" , { class: "col col-md-auto ps-0 text-body-secondary text-nowrap" , text: pages + " · " + Files.size( output.size ) } ),
+        Dom.el( "div" , { class: "col-auto pe-0" , children: [
+          PdfLinks.link( Dom.el( "a" , { class: "btn btn-sm btn-outline-primary" , attrs: { "data-label": "button" , title: output.name } } ) , view , output.url , output.name ),
+        ] } ),
       ] } ) );
     }
     Dom.text( row.summary , I18n.get( "local.show_sections" ) );
@@ -933,9 +940,21 @@ const Local = {
     Dom.text( Dom.get( "local-summary" ) , I18n.get( this.running ? "local.summary_running" : "local.summary_finished" )
       .replace( "{done}" , this.running ? finished : this.jobs.filter( ( job ) => job.state === "done" ).length )
       .replace( "{count}" , this.jobs.length ) );
-    const made = this.outputs().length > 0;
+    const outputs = this.outputs();
+    const made = outputs.length > 0;
     Dom.show( Dom.get( "local-cancel" ) , this.running );
-    Dom.show( Dom.get( "local-download-all" ) , made && !this.running );
+    // One file in all: it is the result, so it gets the main button.
+    const main = Dom.get( "local-open-main" );
+    const single = !this.running && outputs.length === 1 ? outputs[ 0 ] : null;
+    if ( single ) {
+      PdfLinks.link( main , single.view || single.url , single.url , single.name );
+      main.title = single.name;
+    }
+    Dom.show( main , Boolean( single ) );
+    const all = Dom.get( "local-download-all" );
+    all.classList.toggle( "btn-primary" , !single );
+    all.classList.toggle( "btn-outline-primary" , Boolean( single ) );
+    Dom.show( all , made && !this.running );
     Dom.show( Dom.get( "local-save-folder" ) , made && !this.running && this.where === "device" && typeof window.showDirectoryPicker === "function" );
   },
 };

@@ -75,8 +75,12 @@ const PdfLinks = {
       link.removeAttribute( "rel" );
       link.download = link.dataset.name;
     }
-    // A button-styled link says what it does.
-    if ( link.dataset.label === "button" ) Dom.text( link , I18n.get( this.opens() ? "pdf_links.open_button" : "files.download_button" ) );
+    // A button-styled link says what it does, with its icon.
+    if ( link.dataset.label === "button" ) {
+      Dom.clear( link );
+      link.appendChild( Dom.el( "i" , { class: "bi me-1 " + ( this.opens() ? "bi-box-arrow-up-right" : "bi-download" ) , attrs: { "aria-hidden": "true" } } ) );
+      link.appendChild( Dom.el( "span" , { text: I18n.get( this.opens() ? "pdf_links.open_button" : "files.download_button" ) } ) );
+    }
   },
 
   // Renames a drawn link's file.

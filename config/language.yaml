@@ -786,6 +786,7 @@ local:
   # {percent} done, on {name}: the file being written.
   splitting: "{percent}% · {name}"
   done: "{count} files · {size}"
+  done_one: "1 file · {size}"
   # Remove watermarks' check, which makes no file.
   checked: "Checked"
   folded: "Folded into the section starting on the same page: {count}."
