@@ -287,7 +287,7 @@ class RunWorker:
             # result is the one that counts.
             return
         runs.update(self.store, run.id, state=runs.DONE, owner="", lease_until=0.0, progress=1.0, step="", result=result, finished_at=utc_now())
-        if not run.chain_id:
+        if not run.chain_id and not action.keeps_upload(options):
             drop_used_upload(self.store, run.file_id)
 
     def _fail(self, run: runs.Run, code: str) -> None:

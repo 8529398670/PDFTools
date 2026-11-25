@@ -530,6 +530,40 @@ const Local = {
     } );
   },
 
+  // Remove watermarks, again, taking out just the findings picked from
+  // the last run's list: here, or as a new run on the server's copy (a
+  // check keeps the upload for this; see Action.keeps_upload).
+  async removePicked( job , ids ) {
+    if ( this.running ) return;
+    const options = Object.assign( {} , this.steps ? this.steps[ 0 ].options : {} , { mode: "remove" , picked: ids } );
+    const steps = [ { action: "remove_watermarks" , options } ];
+    this.steps = steps;
+    job.outputs = [];
+    job.fraction = 0;
+    job.result = null;
+    if ( job.row ) {
+      Dom.swap( job.row.list );
+      job.row.shown = 0;
+    }
+    Dom.toast( I18n.get( "watermarks.started" ) , "ok" );
+    await this.busy( async () => {
+      if ( this.where === "server" ) {
+        const started = await Api.startActionMany( [ job.id ] , "remove_watermarks" , options );
+        const one = started.runs.find( ( item ) => item.file_id === job.id );
+        if ( !one ) {
+          const refused = started.skipped.find( ( item ) => item.file_id === job.id );
+          this.setState( job , "failed" , refused ? refused.error : "source_gone" );
+          return;
+        }
+        job.runId = one.id;
+        this.setState( job , "queued" );
+        await this.follow();
+      } else {
+        await this.runOne( job , steps );
+      }
+    } );
+  },
+
   async inspectAll( bookmarks ) {
     for ( const job of this.jobs ) {
       if ( this.cancelled ) {
@@ -726,11 +760,13 @@ const Local = {
     const list = Dom.el( "ul" , { class: "list-unstyled mb-0 mt-1" } );
     const summary = Dom.el( "summary" , { class: "text-body-secondary" } );
     const details = Dom.el( "details" , { class: "mt-1" , children: [ summary , list ] } );
+    // Remove watermarks' findings, to pick from (js/watermarks.js).
+    const findings = Dom.el( "div" );
     const element = Dom.el( "li" , { class: "list-group-item px-0" , children: [
       Dom.el( "div" , { class: "d-flex flex-wrap align-items-center gap-2" , children: [ name , status , again ] } ),
-      bar, note, details,
+      bar, note, findings, details,
     ] } );
-    job.row = { element , status , bar , note , list , summary , details , again , shown: 0 };
+    job.row = { element , status , bar , note , list , summary , details , again , findings , findingsFor: null , shown: 0 };
     this.paintJob( job );
     return element;
   },
@@ -747,7 +783,8 @@ const Local = {
       reading: I18n.get( "local.reading" ),
       waiting: I18n.get( "local.waiting" ),
       splitting: I18n.get( "local.splitting" ).replace( "{percent}" , percent ).replace( "{name}" , job.name || job.file.name ),
-      done: I18n.get( "local.done" ).replace( "{count}" , job.outputs.length ).replace( "{size}" , Files.size( size ) ),
+      done: job.result && job.result.mode === "check" ? I18n.get( "local.checked" )
+        : I18n.get( "local.done" ).replace( "{count}" , job.outputs.length ).replace( "{size}" , Files.size( size ) ),
       failed: I18n.get( "local.failed" ).replace( "{reason}" , I18n.get( "local.errors." + job.reason ) || job.reason ),
       cancelled: I18n.get( "local.cancelled" ),
     };
@@ -764,8 +801,21 @@ const Local = {
         ? I18n.get( "local.smaller" ).replace( "{before}" , Files.size( job.result.before ) ).replace( "{after}" , Files.size( job.result.after ) )
         : I18n.get( "local.no_smaller" ) );
     }
+    const watermarks = job.state === "done" && job.result && Array.isArray( job.result.findings );
+    if ( watermarks ) notes.push( Watermarks.note( job.result , "local" ) );
     Dom.text( row.note , notes.join( " " ) );
     Dom.show( row.note , notes.length > 0 );
+    if ( !watermarks ) {
+      Dom.clear( row.findings );
+      row.findingsFor = null;
+    } else if ( row.findingsFor !== job.result || row.findingsLive !== !this.running ) {
+      // Drawn again once the batch ends, when its button can be pressed;
+      // what was ticked is kept in job.picks.
+      if ( row.findingsFor !== job.result ) job.picks = Watermarks.state( job.result );
+      row.findingsFor = job.result;
+      row.findingsLive = !this.running;
+      Dom.swap( row.findings , Watermarks.panel( job.result , job.picks , this.running ? null : ( ids ) => this.removePicked( job , ids ) ) );
+    }
     // New sections are added below the ones already shown, never redrawn.
     for ( ; row.shown < job.outputs.length ; row.shown++ ) {
       const output = job.outputs[ row.shown ];

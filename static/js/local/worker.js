@@ -20,7 +20,8 @@
 //               on the private disk until the chain ends, then go)
 //               { type: "done" , result }  { type: "error" , code , detail }
 importScripts( "/vendor/qpdf/qpdf.js" , "/js/local/split_bookmarks.js" , "/js/local/opfs_fs.js" ,
-  "/js/local/pages.js" , "/js/local/rotate.js" , "/js/local/compress.js" );
+  "/js/local/pages.js" , "/js/local/rotate.js" , "/js/local/compress.js" ,
+  "/js/local/wm_core.js" , "/js/local/remove_watermarks.js" );
 
 // Each tool's browser twin, by action name. run( qpdf , source , work ,
 // options , hooks , sourceName ) answers the action's result.
@@ -28,6 +29,7 @@ const TOOLS = {
   split_bookmarks: ( qpdf , source , work , options , hooks ) => LocalSplit.split( qpdf , source , work , options , hooks ),
   rotate: ( ...args ) => LocalRotate.run( ...args ),
   compress: ( ...args ) => LocalCompress.run( ...args ),
+  remove_watermarks: ( ...args ) => LocalWatermarks.run( ...args ),
 };
 
 let qpdfReady = null;

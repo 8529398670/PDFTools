@@ -18,6 +18,7 @@ global.LocalPages = require( path.join( local , "pages.js" ) ).LocalPages;
 const TOOLS = {
   rotate: require( path.join( local , "rotate.js" ) ).LocalRotate,
   compress: require( path.join( local , "compress.js" ) ).LocalCompress,
+  remove_watermarks: { run: ( ...args ) => require( path.join( local , "remove_watermarks.js" ) ).LocalWatermarks.run( ...args ) },
 };
 
 async function main() {

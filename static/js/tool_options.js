@@ -8,10 +8,11 @@ const ToolOptions = {
     split_bookmarks: { level: 1 , front_matter: true , inner_bookmarks: true , numbered: true },
     rotate: { angle: 90 , pages: "all" },
     compress: { level: "lossless" , image_dpi: 150 },
+    remove_watermarks: { mode: "remove" , phrases: [] , regexes: [] , builtin: true , min_confidence: 0.5 , detectors: [] , picked: [] },
   },
 
   // The tools a chain can hold, in the order its picker lists them.
-  chainable: [ "rotate" , "split_bookmarks" , "compress" ],
+  chainable: [ "rotate" , "split_bookmarks" , "compress" , "remove_watermarks" ],
 
   // How deep a chain's split may go, since it cannot look at the PDF first.
   chainLevels: 6,
@@ -38,6 +39,11 @@ const ToolOptions = {
     if ( action === "split_bookmarks" ) return name + " · " + I18n.get( "actions.split_bookmarks.summary" ).replace( "{level}" , chosen.level );
     if ( action === "rotate" ) {
       return name + " · " + I18n.get( "actions.rotate.summary" ).replace( "{angle}" , chosen.angle ).replace( "{pages}" , chosen.pages || "all" );
+    }
+    if ( action === "remove_watermarks" ) {
+      if ( chosen.picked && chosen.picked.length ) return name + " · " + I18n.get( "actions.remove_watermarks.summary_picked" ).replace( "{count}" , chosen.picked.length );
+      if ( chosen.mode === "check" ) return name + " · " + I18n.get( "actions.remove_watermarks.summary_check" );
+      return name + " · " + I18n.get( "actions.remove_watermarks.summary_remove" ).replace( "{percent}" , Math.round( chosen.min_confidence * 100 ) );
     }
     if ( action === "compress" ) {
       return name + " · " + ( chosen.level === "images"
@@ -76,6 +82,23 @@ const ToolOptions = {
           placeholder: "1-3, 7, 10-" , help: I18n.get( "options.pages_help" ) },
       ];
     }
+    if ( action === "remove_watermarks" ) {
+      const fields = [];
+      // A chain cannot stop to let someone pick: only a tool screen checks.
+      if ( jobs ) {
+        fields.push( { name: "mode" , label: I18n.get( "options.wm_mode" ) , type: "select" , value: chosen.mode , options: [ "remove" , "check" ].map( ( mode ) => (
+          { value: mode , label: I18n.get( "options.wm_mode_" + mode ) } ) ) } );
+      }
+      return fields.concat( [
+        { name: "min_confidence" , label: I18n.get( "options.wm_confidence" ) , type: "select" , value: String( chosen.min_confidence ) ,
+          options: [ 0.3 , 0.5 , 0.8 ].map( ( value ) => ( { value: String( value ) , label: I18n.get( "options.wm_confidence_" + Math.round( value * 100 ) ) } ) ) },
+        { name: "phrases" , label: I18n.get( "options.wm_phrases" ) , type: "textarea" , value: ( chosen.phrases || [] ).join( "\n" ) ,
+          placeholder: "CONFIDENTIAL" , help: I18n.get( "options.wm_phrases_help" ) },
+        { name: "regexes" , label: I18n.get( "options.wm_regexes" ) , type: "textarea" , rows: 2 , value: ( chosen.regexes || [] ).join( "\n" ) ,
+          help: I18n.get( "options.wm_regexes_help" ) },
+        { name: "builtin" , label: I18n.get( "options.wm_builtin" ) , type: "checkbox" , value: chosen.builtin },
+      ] );
+    }
     if ( action === "compress" ) {
       return [
         { name: "level" , label: I18n.get( "options.level" ) , type: "select" , value: chosen.level , options: [ "lossless" , "images" ].map( ( level ) => (
@@ -92,6 +115,18 @@ const ToolOptions = {
     if ( action === "split_bookmarks" ) return Object.assign( {} , values , { level: Number( values.level ) } );
     if ( action === "rotate" ) return { angle: Number( values.angle ) , pages: String( values.pages || "" ).trim() || "all" };
     if ( action === "compress" ) return { level: values.level , image_dpi: Number( values.image_dpi ) || 150 };
+    if ( action === "remove_watermarks" ) {
+      const lines = ( text ) => String( text || "" ).split( "\n" ).map( ( line ) => line.trim() ).filter( Boolean );
+      return {
+        mode: values.mode === "check" ? "check" : "remove",
+        min_confidence: Number( values.min_confidence ) || 0.5,
+        phrases: lines( values.phrases ).slice( 0 , 50 ),
+        regexes: lines( values.regexes ).slice( 0 , 20 ),
+        builtin: Boolean( values.builtin ),
+        detectors: [],
+        picked: [],
+      };
+    }
     return values;
   },
 

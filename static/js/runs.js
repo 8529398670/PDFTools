@@ -11,6 +11,8 @@ const Runs = {
   open: new Set(),
   // The last read of each open run's files.
   details: new Map(),
+  // What is ticked in each open run's watermark findings (js/watermarks.js).
+  picks: new Map(),
   // At most one read per this, and the last change always gets one. A run
   // moves often; the general rate limit (120 a minute) is shared with
   // everything else the page does.
@@ -121,6 +123,7 @@ const Runs = {
       const notes = [];
       if ( one.result.folded ) notes.push( I18n.get( "runs.folded" ).replace( "{count}" , one.result.folded ) );
       if ( one.result.nowhere ) notes.push( I18n.get( "runs.nowhere" ).replace( "{count}" , one.result.nowhere ) );
+      if ( this.hasFindings( one ) ) notes.push( Watermarks.note( one.result , "runs" ) );
       if ( notes.length ) children.push( Dom.el( "div" , { class: "small text-body-secondary" , text: notes.join( " " ) } ) );
     }
     return children;
@@ -133,7 +136,7 @@ const Runs = {
 
   row( one ) {
     const finished = [ "done" , "failed" , "cancelled" ].includes( one.state );
-    const toggle = one.outputs > 0 ? Dom.el( "button" , {
+    const toggle = one.outputs > 0 || this.hasFindings( one ) ? Dom.el( "button" , {
       class: "btn btn-sm btn-outline-secondary",
       text: I18n.get( this.open.has( one.id ) ? "runs.hide_button" : "runs.show_button" ),
       attrs: { "aria-expanded": String( this.open.has( one.id ) ) },
@@ -193,7 +196,34 @@ const Runs = {
       } ),
     ] } ) );
     if ( !detail ) items.push( Dom.el( "li" , { class: "list-group-item px-0 text-body-secondary" , text: I18n.get( "runs.loading" ) } ) );
-    return Dom.el( "ul" , { class: "list-group list-group-flush small" , children: items } );
+    const list = Dom.el( "ul" , { class: "list-group list-group-flush small" , children: items } );
+    if ( !detail || !this.hasFindings( detail ) ) return list;
+    if ( !this.picks.has( detail.id ) ) this.picks.set( detail.id , Watermarks.state( detail.result ) );
+    const panel = Dom.el( "div" , { class: "small" , children: [
+      Watermarks.panel( detail.result , this.picks.get( detail.id ) , ( ids ) => this.removePicked( detail , ids ) ),
+    ] } );
+    return Dom.el( "div" , { children: items.length ? [ list , panel ] : [ panel ] } );
+  },
+
+  hasFindings( one ) {
+    return one.action === "remove_watermarks" && one.state === "done" && one.result && Array.isArray( one.result.findings );
+  },
+
+  // A new remove run on the same PDF, taking out the findings ticked.
+  async removePicked( detail , ids ) {
+    const options = Object.assign( {} , detail.options || {} , { mode: "remove" , picked: ids } );
+    try {
+      const started = await Api.startActionMany( [ detail.file_id ] , "remove_watermarks" , options );
+      if ( started.skipped.length ) {
+        const why = started.skipped[ 0 ].error;
+        App.showError( I18n.get( "runs.errors." + why ) || why );
+        return;
+      }
+      Dom.toast( I18n.get( "watermarks.started" ) , "ok" );
+    } catch ( error ) {
+      App.showError( error.message );
+    }
+    await this.refresh();
   },
 
   async toggle( one ) {

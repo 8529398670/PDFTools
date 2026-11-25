@@ -35,7 +35,7 @@ from app.routes.mcp_tools import file_url, files_on
 from app.mcp.registry import Call, Refusal
 
 # What a run's zip is called after its PDF: "<stem> - <this>.zip".
-ZIP_SUFFIX = {"split_bookmarks": "sections", "rotate": "rotated", "compress": "compressed"}
+ZIP_SUFFIX = {"split_bookmarks": "sections", "rotate": "rotated", "compress": "compressed", "remove_watermarks": "no watermarks"}
 
 
 def zip_name(action: str, file_name: str) -> str:

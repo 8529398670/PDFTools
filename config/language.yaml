@@ -696,6 +696,9 @@ tools:
     rotate:
       title: "Rotate pages"
       help: "Turn all pages or chosen pages."
+    remove_watermarks:
+      title: "Remove watermarks"
+      help: "Find stamps, overlays and watermark text, then take them out without touching the rest."
     crop:
       title: "Crop"
       help: "Trim the margins of pages."
@@ -758,6 +761,7 @@ local:
     split_bookmarks: "sections"
     rotate: "rotated"
     compress: "compressed"
+    remove_watermarks: "no watermarks"
     chain: "files"
   zip_many: "PDFTools - {count} files.zip"
   reading: "Reading"
@@ -765,9 +769,15 @@ local:
   # {percent} done, on {name}: the file being written.
   splitting: "{percent}% · {name}"
   done: "{count} files · {size}"
+  # Remove watermarks' check, which makes no file.
+  checked: "Checked"
   folded: "Folded into the section starting on the same page: {count}."
   nowhere: "Bookmarks that point nowhere, left out: {count}."
   show_sections: "Files"
+  # Remove watermarks' result.
+  wm_removed: "Removed {count} watermarks."
+  wm_none: "Nothing to remove; kept as it was."
+  wm_found: "Found {count} things that may be watermarks."
   # Compress's result. {before} and {after} are sizes.
   smaller: "{before} → {after}."
   no_smaller: "It was as small as this can make it; kept as it was."
@@ -791,6 +801,7 @@ local:
     qpdf_failed: "qpdf could not write the file"
     bad_pages: "Those pages are not in this PDF"
     server_only: "This option runs on the server only"
+    bad_regex: "One of the patterns is not a valid regular expression"
     unknown_action: "That tool is not here"
     memory: "This device ran out of memory. Try the server instead."
     upload: "The upload did not finish"
@@ -813,6 +824,11 @@ actions:
     name: "Compress"
     summary_lossless: "lossless"
     summary_images: "pictures at {dpi} dpi"
+  remove_watermarks:
+    name: "Remove watermarks"
+    summary_remove: "remove, at least {percent}% sure"
+    summary_check: "check first"
+    summary_picked: "remove {count} picked"
 
 # Each tool's options, in the dialog a tool screen asks before it runs and in
 # a chain's steps (static/js/tool_options.js).
@@ -834,6 +850,21 @@ options:
   level_images: "Also shrink pictures (smaller, runs on the server)"
   image_dpi: "Pictures keep at most (dpi)"
   image_dpi_help: "150 reads well on screen; 300 prints well."
+  remove_watermarks_title_one: "Remove watermarks from {name}"
+  remove_watermarks_title_many: "Remove watermarks from {count} PDFs"
+  remove_watermarks_start: "Go"
+  wm_mode: "What to do"
+  wm_mode_remove: "Remove what it is sure of"
+  wm_mode_check: "Check first, then pick what goes"
+  wm_phrases: "Also remove these words"
+  wm_phrases_help: "One per line, such as CONFIDENTIAL. Matched ignoring case and spaces, anywhere in the text."
+  wm_regexes: "Patterns (regular expressions)"
+  wm_regexes_help: "One per line, such as Licensed to .*"
+  wm_builtin: "Look for common watermark wording too (DRAFT, Journal Pre-proof ...)"
+  wm_confidence: "Remove when at least"
+  wm_confidence_30: "30% sure: also repeated logos and page furniture"
+  wm_confidence_50: "50% sure (usual)"
+  wm_confidence_80: "80% sure: only the obvious"
   split_level: "Split at bookmark level"
   split_level_help: "Level 1 is the top of the outline. A chain cannot look at the PDF first, so pick the level you know it has."
 
@@ -873,6 +904,9 @@ runs:
   made: "{count} files, {size}"
   folded: "{count} bookmarks shared a page with another and were folded in."
   nowhere: "{count} bookmarks point nowhere and were skipped."
+  wm_removed: "Removed {count} watermarks."
+  wm_none: "Nothing to remove; kept as it was."
+  wm_found: "Found {count} things that may be watermarks."
   zip_button: "Download all"
   show_button: "Show files"
   hide_button: "Hide files"
@@ -890,7 +924,26 @@ runs:
     source_gone: "The PDF was deleted before the run started."
     unknown_action: "That action no longer exists."
     file_quota: "That would go over your storage limit."
+    bad_regex: "One of the patterns is not a valid regular expression."
     internal: "Something went wrong. The server log says what."
+
+# Remove watermarks' findings (static/js/watermarks.js), under a check run or
+# a remove run, on a tool screen and on Runs.
+watermarks:
+  heading: "Findings"
+  # {percent} is how sure the finding is.
+  sure: "{percent}%"
+  pages: "Pages {pages}"
+  removed: "Removed"
+  info_only: "Can't be removed: part of the picture"
+  evidence: "Why"
+  # Findings less than {percent}% sure, folded away until asked for.
+  unlikely: "{count} less likely"
+  more: "And {count} more not listed."
+  remove_selected: "Remove selected ({count})"
+  none_selected: "Tick at least one finding."
+  nothing: "No watermarks found."
+  started: "Removing the ones you picked."
 
 # How long files are kept (static/js/retention.js).
 retention:

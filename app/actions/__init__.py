@@ -70,12 +70,16 @@ class Action:
     run: Callable[[Context, Any], dict[str, Any]]
     # What it needs the source to have, checked before it is queued.
     needs_bookmarks: bool = False
+    # Whether a run with these options leaves the upload for a run after
+    # it, even when the upload is to go once used (remove_watermarks' check,
+    # which a remove run on the same file follows).
+    keeps_upload: Callable[[Any], bool] = lambda options: False
 
 
 def _registry() -> dict[str, Action]:
-    from app.actions import compress, rotate, split_bookmarks
+    from app.actions import compress, remove_watermarks, rotate, split_bookmarks
 
-    actions = [split_bookmarks.ACTION, rotate.ACTION, compress.ACTION]
+    actions = [split_bookmarks.ACTION, rotate.ACTION, compress.ACTION, remove_watermarks.ACTION]
     return {action.name: action for action in actions}
 
 
@@ -90,7 +94,7 @@ TOOL_IDS: tuple[str, ...] = (
     "extract_pages", "delete_pages", "split_bookmarks", "split_pages", "split_size", "split_text",
     "alternate_mix", "visual_combine", "merge",
     "extract_text", "grayscale", "images_to_pdf",
-    "compress", "rotate", "crop", "protect", "unprotect", "repair",
+    "compress", "rotate", "remove_watermarks", "crop", "protect", "unprotect", "repair",
 )
 
 

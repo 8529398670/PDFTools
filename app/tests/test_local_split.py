@@ -23,3 +23,8 @@ class LocalSplitTest(unittest.TestCase):
         answer = subprocess.run([sys.executable, str(ROOT / "scripts" / "check_local_tools.py")],
                                 capture_output=True, text=True, cwd=ROOT)
         self.assertEqual(answer.returncode, 0, answer.stdout + answer.stderr)
+
+    def test_the_browser_removes_watermarks_like_the_server(self) -> None:
+        answer = subprocess.run([sys.executable, str(ROOT / "scripts" / "check_local_watermarks.py")],
+                                capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(answer.returncode, 0, answer.stdout + answer.stderr)

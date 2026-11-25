@@ -35,12 +35,13 @@ from app.mcp.registry import Call, Refusal
 
 # What every client is told when it connects (initialize's instructions): the
 # tools are the API, but a PDF's bytes never go through them.
-INSTRUCTIONS = """PDFTools does things to PDFs: split by bookmarks, rotate, compress, and chains of these.
+INSTRUCTIONS = """PDFTools does things to PDFs: split by bookmarks, rotate, compress, remove watermarks, and chains of these.
 
 File bytes never travel through MCP. Send and fetch them over plain HTTP, with the same `Authorization: Bearer <key>` header this connection uses:
 
 1. Upload: call files_start_upload (name, size, type). It answers the file's id, chunk_url, chunk_bytes and a ready curl loop. POST each piece of the file, in order, as application/octet-stream to chunk_url with {index} = 0, 1, 2 ... Then call files_finish_upload. Wait until files_get says pdf_state is "ok" (the server reads the PDF first); "invalid" means it is not a usable PDF.
 2. Run: actions_list says what each action takes. actions_start runs one action on one file; chains_start runs several in order on each file, each later step on every file the step before made (split then compress compresses each section).
+   remove_watermarks with mode "check" makes no file: its result lists findings, each with an id, confidence and evidence. Start it again with picked set to the ids to take out just those.
 3. Follow: poll runs_get (or chains_get) every few seconds until state is done, failed or cancelled. message says why one failed.
 4. Download: runs_download_url (or chains_download_url) gives a zip_url and each file's url. GET them over HTTP with the same header. files_download_url does the same for one file.
 

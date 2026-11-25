@@ -472,6 +472,7 @@ const Dom = {
   //   "checkbox" -- answers true or false
   //   "select"   -- options: [ { value , label } ]
   //   "checks"   -- a group of boxes: options as above, answers the values ticked
+  //   "textarea" -- several lines (rows, default 3), answered as typed
   form( options ) {
     const element = this.get( "form-modal" );
     if ( element._open ) return Promise.resolve( null );
@@ -568,7 +569,9 @@ const Dom = {
     const input = type === "select"
       ? this.el( "select" , { class: "form-select" , children: field.options.map(
           ( option ) => this.el( "option" , { text: option.label , attrs: { value: option.value } } ) ) } )
-      : this.el( "input" , { class: "form-control" , attrs: { type: type } } );
+      : type === "textarea"
+        ? this.el( "textarea" , { class: "form-control" , attrs: { rows: String( field.rows || 3 ) } } )
+        : this.el( "input" , { class: "form-control" , attrs: { type: type } } );
     input.id = id;
     input.required = Boolean( field.required );
     if ( help ) input.setAttribute( "aria-describedby" , help.id );

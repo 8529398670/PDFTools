@@ -34,6 +34,7 @@ const Tools = {
     { id: "other" , tools: [
       { id: "compress" , icon: "bi-file-zip" , ready: true },
       { id: "rotate" , icon: "bi-arrow-clockwise" , ready: true },
+      { id: "remove_watermarks" , icon: "bi-droplet-half" , ready: true },
       { id: "crop" , icon: "bi-crop" },
       { id: "protect" , icon: "bi-lock" },
       { id: "unprotect" , icon: "bi-unlock" },

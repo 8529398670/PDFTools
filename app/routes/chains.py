@@ -121,6 +121,9 @@ def _checked_steps(steps: list[Step]) -> list[dict[str, Any]]:
             options = parse_options(action, step.options)
         except ActionError as refusal:
             raise Refused(400, f"step {index + 1}: {refusal}") from None
+        if getattr(options, "mode", "") == "check":
+            # A check makes no file, so no step could follow it.
+            raise Refused(400, f"step {index + 1}: a chain cannot check, only remove")
         checked.append({"action": action.name, "options": options_record(options)})
     return checked
 
