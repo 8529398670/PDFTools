@@ -547,7 +547,24 @@
         <section class="view" data-view="tools" data-path="/tools" id="tools-panel" hidden>
           <h2 class="view-title" data-i18n="tools.heading"></h2>
           <p class="view-description" data-i18n="tools.description"></p>
+          <div class="row g-2 align-items-center mb-3" role="search">
+            <div class="col-12 col-md">
+              <label for="tools-search" class="visually-hidden" data-i18n="tools.search_label"></label>
+              <input id="tools-search" class="form-control" type="search" autocomplete="off"
+                     data-i18n-attr="placeholder:tools.search_label" />
+            </div>
+            <div class="col-auto">
+              <span id="tools-search-status" class="small text-body-secondary text-nowrap" role="status"></span>
+            </div>
+            <div class="col-auto ms-auto">
+              <div class="btn-group btn-group-sm" role="group">
+                <button id="tools-expand-all" type="button" class="btn btn-outline-secondary"><i class="bi bi-arrows-expand me-1" aria-hidden="true"></i><span data-i18n="tools.expand_all"></span></button>
+                <button id="tools-collapse-all" type="button" class="btn btn-outline-secondary"><i class="bi bi-arrows-collapse me-1" aria-hidden="true"></i><span data-i18n="tools.collapse_all"></span></button>
+              </div>
+            </div>
+          </div>
           <div id="tools-sections" class="accordion"></div>
+          <p id="tools-search-none" class="text-body-secondary mt-3" data-i18n="tools.search_none" hidden></p>
         </section>
 
         <!-- One screen per built tool, opened from Tools. They share one drop

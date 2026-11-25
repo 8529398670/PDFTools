@@ -635,16 +635,21 @@ split:
 tools:
   heading: "Tools"
   description: "Everything this app can do to a PDF. Open a section to see its tools."
+  search_label: "Search tools"
+  search_count: "{count} of {total}"
+  search_none: "No tool matches that search."
+  expand_all: "Expand all"
+  collapse_all: "Collapse all"
   todo: "TODO"
   count: "{count}"
   open: "Open"
   back: "All tools"
   sections:
-    chain: "Chains"
     split: "Split"
     merge: "Merge"
     convert: "Convert"
     other: "Other"
+    chain: "Chain"
   items:
     extract_pages:
       title: "Extract pages"

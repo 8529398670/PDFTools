@@ -13,9 +13,6 @@
 // the cards: the choice lives on Account.
 const Tools = {
   catalog: [
-    { id: "chain" , tools: [
-      { id: "chain" , icon: "bi-link-45deg" , ready: true },
-    ] },
     { id: "split" , tools: [
       { id: "extract_pages" , icon: "bi-file-earmark-arrow-up" },
       { id: "delete_pages" , icon: "bi-file-earmark-x" },
@@ -42,14 +39,21 @@ const Tools = {
       { id: "unprotect" , icon: "bi-unlock" },
       { id: "repair" , icon: "bi-wrench-adjustable" },
     ] },
+    { id: "chain" , tools: [
+      { id: "chain" , icon: "bi-link-45deg" , ready: true },
+    ] },
   ],
   modes: [ "auto" , "device" , "server" ],
   engines: [ "device" , "server" ],
   me: null,
+  beforeSearch: null,
 
   init( me ) {
     this.me = me;
     Dom.show( Dom.get( "tools-panel" ) , true );
+    Dom.get( "tools-search" ).addEventListener( "input" , () => this.applySearch() );
+    Dom.onPress( Dom.get( "tools-expand-all" ) , () => this.toggleAll( true ) );
+    Dom.onPress( Dom.get( "tools-collapse-all" ) , () => this.toggleAll( false ) );
     this.render();
     // The tool screens have no sidebar link of their own: Tools stays lit.
     window.addEventListener( "nav" , ( event ) => {
@@ -110,6 +114,60 @@ const Tools = {
     const open = new Set( Dom.all( ".accordion-collapse.show" , holder ).map( ( node ) => node.id ) );
     Dom.clear( holder );
     this.catalog.forEach( ( section ) => holder.appendChild( this.sectionRow( section , open ) ) );
+    this.applySearch();
+  },
+
+  // ---- search, expand and collapse -----------------------------------------
+
+  // Every word typed must appear in a tool's title, help or section name.
+  // While a search is on, sections with a match are open and the rest are
+  // hidden; clearing it puts back the rows that were open before.
+  applySearch() {
+    const holder = Dom.get( "tools-sections" );
+    const words = Dom.get( "tools-search" ).value.trim().toLowerCase().split( /\s+/ ).filter( Boolean );
+    const searching = words.length > 0;
+    if ( searching && !this.beforeSearch ) {
+      this.beforeSearch = new Set( Dom.all( ".accordion-collapse.show" , holder ).map( ( node ) => node.id ) );
+    }
+    let shown = 0;
+    let total = 0;
+    Dom.all( ".accordion-item" , holder ).forEach( ( item ) => {
+      let matches = 0;
+      Dom.all( "[data-words]" , item ).forEach( ( col ) => {
+        const hit = words.every( ( word ) => col.getAttribute( "data-words" ).includes( word ) );
+        Dom.show( col , hit );
+        total += 1;
+        if ( hit ) matches += 1;
+      } );
+      shown += matches;
+      Dom.show( item , matches > 0 );
+      const collapse = item.querySelector( ".accordion-collapse" );
+      if ( searching ) this.setOpen( collapse , matches > 0 );
+      else if ( this.beforeSearch ) this.setOpen( collapse , this.beforeSearch.has( collapse.id ) );
+    } );
+    if ( !searching ) this.beforeSearch = null;
+    Dom.text( Dom.get( "tools-search-status" ) , searching
+      ? I18n.get( "tools.search_count" ).replace( "{count}" , shown ).replace( "{total}" , total )
+      : "" );
+    Dom.show( Dom.get( "tools-search-none" ) , searching && shown === 0 );
+  },
+
+  // Opens or shuts a section at once, with no animation (search redraws).
+  setOpen( collapse , open ) {
+    collapse.classList.toggle( "show" , open );
+    const button = document.querySelector( '[data-bs-target="#' + collapse.id + '"]' );
+    if ( !button ) return;
+    button.classList.toggle( "collapsed" , !open );
+    button.setAttribute( "aria-expanded" , String( open ) );
+  },
+
+  // Expand all / Collapse all: every section the search leaves showing.
+  toggleAll( open ) {
+    Dom.all( "#tools-sections .accordion-item" ).forEach( ( item ) => {
+      if ( item.hidden ) return;
+      const instance = bootstrap.Collapse.getOrCreateInstance( item.querySelector( ".accordion-collapse" ) , { toggle: false } );
+      if ( open ) instance.show(); else instance.hide();
+    } );
   },
 
   sectionRow( section , open ) {
@@ -127,7 +185,11 @@ const Tools = {
     if ( ready < section.tools.length ) button.appendChild( Dom.badge( I18n.get( "tools.todo" ) + " " + ( section.tools.length - ready ) , "warning" ) );
     const grid = Dom.el( "div" , {
       class: "row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3",
-      children: section.tools.map( ( tool ) => Dom.el( "div" , { class: "col" , children: [ this.toolCard( tool ) ] } ) ),
+      children: section.tools.map( ( tool ) => Dom.el( "div" , {
+        class: "col",
+        attrs: { "data-words": [ this.title( tool.id ) , I18n.get( "tools.items." + tool.id + ".help" ) , I18n.get( "tools.sections." + section.id ) ].join( " " ).toLowerCase() },
+        children: [ this.toolCard( tool ) ],
+      } ) ),
     } );
     return Dom.el( "div" , {
       class: "accordion-item",
