@@ -1657,7 +1657,7 @@
         "readOnlyHint": true,
         "title": "Where to download a file"
       },
-      "description": "The address of one of your files. GET it over HTTP with the same Authorization: Bearer header this MCP connection uses; the bytes do not come through MCP.",
+      "description": "The address of one of your files. GET it over HTTP with the same Authorization: Bearer header this MCP connection uses; the bytes do not come through MCP. url is the download (an attachment); view_url is the same PDF inline, for showing it in a browser.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

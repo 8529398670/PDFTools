@@ -453,7 +453,7 @@ const Local = {
         job.result = detail.result;
         if ( detail.state === "done" ) {
           job.outputs = detail.files.map( ( file ) => ( {
-            name: file.name , size: file.size , pages: file.pages , id: file.id , url: Api.fileDownloadPath( file.id ),
+            name: file.name , size: file.size , pages: file.pages , id: file.id , url: Api.fileDownloadPath( file.id ) , view: Api.fileViewPath( file.id ),
           } ) );
           this.setState( job , "done" );
         } else if ( detail.state === "failed" ) {
@@ -669,8 +669,9 @@ const Local = {
         } else if ( data.type === "output" ) {
           const file = data.stored ? await this.storedFile( data.stored ) : data.blob;
           const url = URL.createObjectURL( file );
-          this.urls.push( url );
-          job.outputs.push( { name: data.name , meta: data.meta , size: data.size , file , url } );
+          const view = PdfLinks.viewUrl( file );
+          this.urls.push( url , view );
+          job.outputs.push( { name: data.name , meta: data.meta , size: data.size , file , url , view } );
           this.paintJob( job );
         }
       } )() ) );
@@ -721,6 +722,14 @@ const Local = {
     if ( this.cancelled || outputs.length === 0 ) return;
     if ( outputs.length === 1 ) {
       const only = outputs[ 0 ];
+      // A new tab can only open from a press, so the toast's button opens it.
+      if ( PdfLinks.opens() && only.view ) {
+        Dom.toast( I18n.get( "pdf_links.ready_one" ).replace( "{name}" , only.name ) , "ok" , {
+          text: I18n.get( "local.open_again" ),
+          run: () => PdfLinks.follow( only.view , only.url , only.name ),
+        } );
+        return;
+      }
       this.save( only.url , only.name );
       Dom.toast( I18n.get( "local.downloading" ).replace( "{name}" , only.name ) , "ok" , {
         text: I18n.get( "local.download_again" ),
@@ -911,7 +920,7 @@ const Local = {
           : output.meta.first_page + "–" + output.meta.last_page;
       row.list.appendChild( Dom.el( "li" , { class: "d-flex flex-wrap align-items-baseline gap-2 py-1 border-bottom" , children: [
         Dom.el( "i" , { class: "bi bi-file-earmark-pdf text-body-secondary" , attrs: { "aria-hidden": "true" } } ),
-        Dom.el( "a" , { class: "text-break flex-grow-1" , text: output.name , attrs: { href: output.url , download: output.name } } ),
+        PdfLinks.link( Dom.el( "a" , { class: "text-break flex-grow-1" , text: output.name } ) , output.view || output.url , output.url , output.name ),
         Dom.el( "span" , { class: "text-body-secondary text-nowrap" , text: pages + " · " + Files.size( output.size ) } ),
       ] } ) );
     }

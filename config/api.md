@@ -47,6 +47,7 @@ An error reply is a JSON object whose `error` says what went wrong.
 |---|---|---|---|
 | POST | [`/api/account/login-link`](#post-apiaccountlogin-link) | A login link for yourself | browser session or API key, anyone signed in |
 | POST | [`/api/account/login-link/cancel`](#post-apiaccountlogin-linkcancel) | Stop your own login link working | browser session or API key, anyone signed in |
+| POST | [`/api/account/pdf-links`](#post-apiaccountpdf-links) | Choose what PDF links do | browser session or API key, anyone signed in |
 | POST | [`/api/account/rename`](#post-apiaccountrename) | Rename your account | browser session or API key, anyone signed in |
 | GET | [`/api/account/sessions`](#get-apiaccountsessions) | Your signed-in devices | browser session or API key, anyone signed in |
 | POST | [`/api/account/sessions/revoke-others`](#post-apiaccountsessionsrevoke-others) | Sign out every other device | browser session or API key, anyone signed in |
@@ -120,6 +121,31 @@ Void your account's live login link without making a new one. Devices it already
 |---|---|---|---|---|
 | `ok` | boolean | yes |  |  |
 | `removed` | integer | yes |  | Links removed: 0 or 1. |
+
+### POST /api/account/pdf-links
+
+Choose what PDF links do
+
+Choose what a PDF link does on every screen: open (the default) shows it in a new tab in the browser's own PDF viewer; download saves it. Both GET /api/files/{file_id}/view and .../download stay available whatever you pick; this only changes which one the pages link to.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 403, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `pdf_links` | string | yes |  | open (the default): a PDF link opens in a new tab in the browser's own viewer. download: it is saved, as an attachment. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `ok` | boolean | yes |  |  |
+| `pdf_links` | string | yes | one of `open`, `download` |  |
 
 ### POST /api/account/rename
 
@@ -1180,6 +1206,7 @@ Off by default. When on, the key may ask POST /api/account/login-link for a link
 | GET | [`/api/admin/files/{file_id}/download`](#get-apiadminfilesfile_iddownload) | Download anyone's file | browser session only, admins |
 | POST | [`/api/admin/files/{file_id}/rename`](#post-apiadminfilesfile_idrename) | Rename any file | browser session only, admins |
 | POST | [`/api/admin/files/{file_id}/restore`](#post-apiadminfilesfile_idrestore) | Put back a deleted file | browser session only, admins |
+| GET | [`/api/admin/files/{file_id}/view`](#get-apiadminfilesfile_idview) | Open anyone's PDF in the browser | browser session only, admins |
 | GET | [`/api/admin/storage`](#get-apiadminstorage) | Storage for everyone | browser session or API key, admins |
 | POST | [`/api/bulk/files/delete`](#post-apibulkfilesdelete) | Delete a file, for many at once | browser session or API key, anyone signed in |
 | POST | [`/api/bulk/files/restore`](#post-apibulkfilesrestore) | Restore a deleted file, for many at once | browser session or API key, anyone signed in |
@@ -1194,6 +1221,7 @@ Off by default. When on, the key may ask POST /api/account/login-link for a link
 | POST | [`/api/files/{file_id}/finish`](#post-apifilesfile_idfinish) | Finish an upload | browser session or API key, anyone signed in |
 | POST | [`/api/files/{file_id}/rename`](#post-apifilesfile_idrename) | Rename a file | browser session or API key, anyone signed in |
 | POST | [`/api/files/{file_id}/restore`](#post-apifilesfile_idrestore) | Restore a deleted file | browser session or API key, anyone signed in |
+| GET | [`/api/files/{file_id}/view`](#get-apifilesfile_idview) | Open one of your PDFs in the browser | browser session or API key, anyone signed in |
 
 ### GET /api/account/storage
 
@@ -1367,6 +1395,27 @@ Put back a deleted file
 **Reply 200**: Success
 
 [`File`](#file).
+
+### GET /api/admin/files/{file_id}/view
+
+Open anyone's PDF in the browser
+
+As GET /api/files/{file_id}/view, for anyone's file. Written to the activity log when the file is someone else's.
+
+|  |  |
+|---|---|
+| Who may call | browser session only, admins |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `file_id` | path | string | yes |  | The file's id, from GET /api/admin/files (admin_list_files over MCP). |
+
+**Reply 200**: The PDF, inline
+
+Text, as `application/pdf`.
 
 ### GET /api/admin/storage
 
@@ -1789,6 +1838,27 @@ Bring back a file you deleted, while it is still in the bin and your storage quo
 **Reply 200**: Success
 
 [`File`](#file).
+
+### GET /api/files/{file_id}/view
+
+Open one of your PDFs in the browser
+
+The same file as .../download, but a PDF (pdf_state ok) comes inline as application/pdf, so a browser shows it in its own viewer. Any other file still comes as an attachment.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| Errors | 400, 401, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `file_id` | path | string | yes |  | The file's id, from GET /api/files (files_list over MCP). |
+
+**Reply 200**: The PDF, inline
+
+Text, as `application/pdf`.
 
 ## Admin
 
@@ -3942,6 +4012,7 @@ The shapes the routes above refer to by name.
 | `mcp_url` | string | yes |  | Where to read the MCP reference: config/mcp.json in app.repo, or /api/mcp.json when there is no repo. Only with server.mcp on. |
 | `openapi_url` | string | yes |  | Where to read this API's reference: config/api.json in app.repo, or /api/api.json when there is no repo. |
 | `owner` | boolean | yes |  | Whether this is the owner's account: the same as is_owner, under portal contract v3's name. |
+| `pdf_links` | string | yes | one of `open`, `download` | What a PDF link does for you: open (the default) shows it in a new tab in the browser's own viewer, through GET /api/files/{file_id}/view; download saves it, through .../download. |
 | `repo` | string | yes |  | app.repo without a trailing / or .git: where the source lives. Empty when it is not set. |
 | `role` | string | yes | one of `admin`, `user`, `viewer` | The effective role: never higher than an API key's own. A viewer may read, and change nothing. |
 | `shortcuts` | map of string | yes |  | The keyboard shortcuts you changed, by action. Mod is Cmd on a Mac and Ctrl elsewhere. |

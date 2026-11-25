@@ -110,6 +110,8 @@ const Api = {
   setShortcuts( shortcuts )    { return this.post( "/api/account/shortcuts" , { shortcuts: shortcuts } ); },
   // The whole set of run modes: "*" and tool ids; {} is Automatic for all. See tool_modes.js.
   setToolModes( modes )        { return this.post( "/api/account/tool-modes" , { tool_modes: modes } ); },
+  // "open" or "download". See pdf_links.js.
+  setPdfLinks( choice )        { return this.post( "/api/account/pdf-links" , { pdf_links: choice } ); },
   // Your whole list of themes (null: back to the defaults), the built-in
   // themes it has seen and the one you use; or only the one you use. See theme.js.
   setThemes( themes , id , builtins ) { return this.post( "/api/account/themes" , { themes: themes , theme_id: id , builtins: builtins || 0 } ); },
@@ -228,6 +230,8 @@ const Api = {
   restoreAnyFile( id )         { return this.post( "/api/admin/files/" + encodeURIComponent( id ) + "/restore" ); },
   fileDownloadPath( id )       { return "/api/files/" + encodeURIComponent( id ) + "/download"; },
   anyFileDownloadPath( id )    { return "/api/admin/files/" + encodeURIComponent( id ) + "/download"; },
+  fileViewPath( id )           { return "/api/files/" + encodeURIComponent( id ) + "/view"; },
+  anyFileViewPath( id )        { return "/api/admin/files/" + encodeURIComponent( id ) + "/view"; },
 
   // Actions and their runs (runs.js), and retention (retention.js).
   actions()                    { return this.request( "/api/actions" ); },

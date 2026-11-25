@@ -54,7 +54,10 @@ CONTENT_SECURITY_POLICY = "; ".join(
         "img-src 'self' data:",
         "font-src 'self'",
         "connect-src 'self'",
-        "object-src 'none'",
+        # blob: only: a PDF made in the page (static/js/pdf_links.js) opens
+        # as a blob: URL, which keeps this policy, and a browser's PDF viewer
+        # is an embedded object. Nothing else may be embedded.
+        "object-src blob:",
         "base-uri 'self'",
         "form-action 'self'",
         "frame-ancestors 'none'",

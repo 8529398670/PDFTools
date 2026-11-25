@@ -457,6 +457,31 @@
             </div>
           </section>
 
+          <!-- What a PDF link does: open in a new tab or download, kept on
+               the account. See js/pdf_links.js. -->
+          <section class="card" data-write id="pdf-links-panel" data-path="/account/pdf-links" hidden>
+            <div class="card-body">
+              <h3 class="card-title" data-i18n="pdf_links.heading"></h3>
+              <p class="text-body-secondary" data-i18n="pdf_links.description"></p>
+              <div class="vstack gap-2" role="radiogroup" aria-labelledby="pdf-links-panel">
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="pdf-links" id="pdf-links-open" value="open">
+                  <label class="form-check-label" for="pdf-links-open">
+                    <i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i><span data-i18n="pdf_links.open"></span>
+                    <span class="d-block small text-body-secondary" data-i18n="pdf_links.open_help"></span>
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="pdf-links" id="pdf-links-download" value="download">
+                  <label class="form-check-label" for="pdf-links-download">
+                    <i class="bi bi-download me-1" aria-hidden="true"></i><span data-i18n="pdf_links.download"></span>
+                    <span class="d-block small text-body-secondary" data-i18n="pdf_links.download_help"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <details class="card card-collapse" id="sessions-card">
             <summary class="card-header">
               <h3 class="card-title" data-i18n="sessions.heading"></h3>
@@ -1281,6 +1306,7 @@
   <script src="/vendor/bootstrap.bundle.min.js"></script>
   <script src="/vendor/qrcode.js"></script>
   <script src="/js/dom.js"></script>
+  <script src="/js/pdf_links.js"></script>
   <script src="/js/qr.js"></script>
   <script src="/js/login_links.js"></script>
   <script src="/js/i18n.js"></script>

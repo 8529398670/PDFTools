@@ -761,7 +761,7 @@ Runs files_delete once per item: items holds each call's arguments, shared the a
 
 ## files_download_url
 
-The address of one of your files. GET it over HTTP with the same Authorization: Bearer header this MCP connection uses; the bytes do not come through MCP.
+The address of one of your files. GET it over HTTP with the same Authorization: Bearer header this MCP connection uses; the bytes do not come through MCP. url is the download (an attachment); view_url is the same PDF inline, for showing it in a browser.
 
 |  |  |
 |---|---|

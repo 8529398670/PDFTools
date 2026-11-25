@@ -128,12 +128,14 @@ def _upload_row(file: models.File) -> FileUpload:
     return FileUpload(**msgspec.structs.asdict(_row(file)), chunk_bytes=FILE_CHUNK_BYTES, missing=missing)
 
 
-def content_disposition(name: str) -> str:
-    """Always attachment: an uploaded page must never run as this site. The
-    plain filename is the fallback for old clients, and filename* carries the
-    real name (RFC 6266)."""
+def content_disposition(name: str, inline: bool = False) -> str:
+    """Attachment, unless inline is asked for (only ever for a file read as a
+    PDF, see _send): an uploaded page must never run as this site. The plain
+    filename is the fallback for old clients, and filename* carries the real
+    name (RFC 6266)."""
     plain = "".join(character if character.isascii() and (character.isalnum() or character in "._-") else "_" for character in name)
-    return f"attachment; filename=\"{plain}\"; filename*=UTF-8''{quote(name, safe='-._~')}"
+    kind = "inline" if inline else "attachment"
+    return f"{kind}; filename=\"{plain}\"; filename*=UTF-8''{quote(name, safe='-._~')}"
 
 
 class FileIDPath(RequestType):
@@ -476,10 +478,21 @@ def finish_file(request: Request, body: FileIDPath) -> File:
     return _row(finished)
 
 
-async def _send(request: Request, file: models.File) -> Response:
-    """Send a finished file. It is only ever an attachment of an opaque type:
-    nosniff is on every response, and nothing the uploader said about the file
-    reaches the headers except its cleaned name.
+# The policy for a PDF sent inline. The site's own (app/core/middleware.py) has
+# object-src 'none', which stops a browser's PDF viewer from showing it at all;
+# this one lets the PDF itself be shown and nothing else load or run.
+PDF_VIEW_CSP = "default-src 'none'; object-src 'self'; frame-ancestors 'none'"
+
+
+async def _send(request: Request, file: models.File, view: bool = False) -> Response:
+    """Send a finished file. It is an attachment of an opaque type: nosniff is
+    on every response, and nothing the uploader said about the file reaches
+    the headers except its cleaned name.
+
+    With view, a file the server has read as a PDF (pdf_state ok) is sent
+    inline as application/pdf instead, so the browser shows it in its own PDF
+    viewer; anything else still goes as an attachment, so the view route can
+    never be used to have a page run as this site.
 
     A plain file goes straight from disk (Starlette's FileResponse), with
     ranges, so a large download can be resumed. An encrypted one is opened a
@@ -489,6 +502,10 @@ async def _send(request: Request, file: models.File) -> Response:
     looking complete."""
     if file.state != models.READY:
         raise Refused(404, NO_SUCH_FILE)
+    inline = view and file.pdf_state == models.PDF_OK
+    media_type = "application/pdf" if inline else "application/octet-stream"
+    disposition = content_disposition(file.name, inline)
+    extra = {"Content-Security-Policy": PDF_VIEW_CSP} if inline else {}
     if not file.encrypted:
         path = models.readable_path(get_config(request), file)
         try:
@@ -499,8 +516,8 @@ async def _send(request: Request, file: models.File) -> Response:
             print(f"[files] file {file.id} has a record but not the right data on disk", flush=True)
             raise Refused(404, NO_SUCH_FILE)
         return FileResponse(
-            path, stat_result=stat, media_type="application/octet-stream",
-            headers={"Content-Disposition": content_disposition(file.name), "Cache-Control": "private, no-store"},
+            path, stat_result=stat, media_type=media_type,
+            headers={"Content-Disposition": disposition, "Cache-Control": "private, no-store", **extra},
         )
     try:
         reader = await run(models.FileReader, get_config(request), file)
@@ -508,14 +525,15 @@ async def _send(request: Request, file: models.File) -> Response:
         print(f"[files] file {file.id} has a record but not the right data on disk", flush=True)
         raise Refused(404, NO_SUCH_FILE) from None
     headers = {
-        "Content-Disposition": content_disposition(file.name),
+        "Content-Disposition": disposition,
         "Content-Length": str(file.size),
         "Cache-Control": "private, no-store",
+        **extra,
     }
     if request.method == "HEAD":
         reader.close()
-        return Response(media_type="application/octet-stream", headers=headers)
-    return StreamingResponse(iter(reader), media_type="application/octet-stream", headers=headers)
+        return Response(media_type=media_type, headers=headers)
+    return StreamingResponse(iter(reader), media_type=media_type, headers=headers)
 
 
 @route(
@@ -524,7 +542,8 @@ async def _send(request: Request, file: models.File) -> Response:
     reply_description="The file, always as an attachment",
     mcp_title="Where to download a file",
     mcp_description="The address of one of your files. GET it over HTTP with the same Authorization: Bearer "
-    "header this MCP connection uses; the bytes do not come through MCP.",
+    "header this MCP connection uses; the bytes do not come through MCP. url is the download (an attachment); "
+    "view_url is the same PDF inline, for showing it in a browser.",
     mcp="files_download_url", read_only=True, enabled=files_on, call=files_download_url,
 )
 async def download_my_file(request: Request, body: FileIDPath) -> Response:
@@ -547,6 +566,36 @@ async def download_any_file(request: Request, body: AdminFileIDPath) -> Response
     if file.user_id != actor_from(request).user.id:
         audit(request, KIND_ADMIN, "file opened by admin", {"file_id": file.id, "user_id": file.user_id})
     return await _send(request, file)
+
+
+@route(
+    "GET /api/files/{file_id}/view", summary="Open one of your PDFs in the browser",
+    tag="Files", feature="files", reply_type="application/pdf",
+    description="The same file as .../download, but a PDF (pdf_state ok) comes inline as application/pdf, "
+    "so a browser shows it in its own viewer. Any other file still comes as an attachment.",
+    reply_description="The PDF, inline",
+)
+async def view_my_file(request: Request, body: FileIDPath) -> Response:
+    file = await run(_mine, request, body.file_id)
+    if file is None:
+        raise Refused(404, NO_SUCH_FILE)
+    return await _send(request, file, view=True)
+
+
+@route(
+    "GET /api/admin/files/{file_id}/view", summary="Open anyone's PDF in the browser",
+    tag="Files", access=SESSION_ONLY, role=ADMIN, feature="files", reply_type="application/pdf",
+    description="As GET /api/files/{file_id}/view, for anyone's file. Written to the activity log when the "
+    "file is someone else's.",
+    reply_description="The PDF, inline",
+)
+async def view_any_file(request: Request, body: AdminFileIDPath) -> Response:
+    file = await run(models.get_file, get_store(request), body.file_id)
+    if file is None or file.deleted:
+        raise Refused(404, NO_SUCH_FILE)
+    if file.user_id != actor_from(request).user.id:
+        audit(request, KIND_ADMIN, "file opened by admin", {"file_id": file.id, "user_id": file.user_id})
+    return await _send(request, file, view=True)
 
 
 class RenameFile(FileIDPath):

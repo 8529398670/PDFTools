@@ -733,6 +733,20 @@ tool_modes:
   # Under the default: what Automatic means on the device in hand.
   unavailable: "Not available for this tool"
 
+# Account > What PDF links do (static/js/pdf_links.js): open a PDF in a new tab
+# in the browser's own viewer, or download it.
+pdf_links:
+  heading: "What PDF links do"
+  description: "Every PDF link on every screen does this. Your choice follows you to every device."
+  open: "Open in a new tab"
+  open_help: "Shows the PDF in your browser's own viewer. Cmd- or Ctrl-click a link to keep it in the background."
+  download: "Download"
+  download_help: "Saves the PDF straight to your downloads folder."
+  saved: "Saved what PDF links do."
+  open_button: "Open"
+  # When a batch ends with one PDF and links open: {name} is its name.
+  ready_one: "{name} is ready."
+
 # A tool screen's drop zone and the splits it runs on this device with qpdf as
 # WebAssembly (static/js/local.js). auto_device, auto_server, memory and
 # unsupported word what Automatic means here, on Account (js/tool_modes.js);
@@ -756,6 +770,7 @@ local:
   rerun: "Run again"
   downloading: "Downloading {name}."
   download_again: "Download again"
+  open_again: "Open"
   ready: "{count} files are ready."
   # {name} is the PDF's, {what} what the tool made of it (zip_names).
   zip_one: "{name} - {what}.zip"

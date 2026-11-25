@@ -499,11 +499,9 @@ const Library = {
   renderRow( file ) {
     this.shown.set( file.id , file );
     const path = this.everyone ? Api.anyFileDownloadPath( file.id ) : Api.fileDownloadPath( file.id );
-    const download = Dom.el( "a" , {
-      class: "btn btn-sm btn-outline-secondary",
-      text: I18n.get( "files.download_button" ),
-      attrs: { href: path , download: file.name },
-    } );
+    const view = this.everyone ? Api.anyFileViewPath( file.id ) : Api.fileViewPath( file.id );
+    const download = Dom.el( "a" , { class: "btn btn-sm btn-outline-secondary" , attrs: { "data-label": "button" } } );
+    PdfLinks.link( download , view , path , file.name );
     const split = !this.everyone ? Dom.el( "button" , {
       class: "btn btn-sm btn-outline-primary",
       text: I18n.get( "library.split_button" ),
@@ -560,7 +558,7 @@ const Library = {
         const renamed = await rename( value , previous );
         if ( renamed.name === previous ) return previous;
         file.name = renamed.name;
-        link.download = renamed.name;
+        PdfLinks.rename( link , renamed.name );
         Undo.record( {
           label: I18n.get( "undo.rename_file" ),
           toast: true,

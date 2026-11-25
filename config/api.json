@@ -701,6 +701,14 @@
             "description": "Whether this is the owner's account: the same as is_owner, under portal contract v3's name.",
             "type": "boolean"
           },
+          "pdf_links": {
+            "description": "What a PDF link does for you: open (the default) shows it in a new tab in the browser's own viewer, through GET /api/files/{file_id}/view; download saves it, through .../download.",
+            "enum": [
+              "open",
+              "download"
+            ],
+            "type": "string"
+          },
           "repo": {
             "description": "app.repo without a trailing / or .git: where the source lives. Empty when it is not set.",
             "type": "string"
@@ -809,6 +817,7 @@
           "mcp_url",
           "openapi_url",
           "owner",
+          "pdf_links",
           "repo",
           "role",
           "shortcuts",
@@ -1792,6 +1801,91 @@
           }
         ],
         "summary": "Stop your own login link working",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
+    "/api/account/pdf-links": {
+      "post": {
+        "description": "Choose what a PDF link does on every screen: open (the default) shows it in a new tab in the browser's own PDF viewer; download saves it. Both GET /api/files/{file_id}/view and .../download stay available whatever you pick; this only changes which one the pages link to.",
+        "operationId": "post_api_account_pdf_links",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "pdf_links": {
+                    "description": "open (the default): a PDF link opens in a new tab in the browser's own viewer. download: it is saved, as an attachment.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "pdf_links"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "pdf_links": {
+                      "enum": [
+                        "open",
+                        "download"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "pdf_links"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Choose what PDF links do",
         "tags": [
           "Account"
         ]
@@ -4008,6 +4102,64 @@
           }
         ],
         "summary": "Put back a deleted file",
+        "tags": [
+          "Files"
+        ],
+        "x-required-role": "admin"
+      },
+      "x-feature": "files"
+    },
+    "/api/admin/files/{file_id}/view": {
+      "get": {
+        "description": "As GET /api/files/{file_id}/view, for anyone's file. Written to the activity log when the file is someone else's.",
+        "operationId": "get_api_admin_files_file_id_view",
+        "parameters": [
+          {
+            "description": "The file's id, from GET /api/admin/files (admin_list_files over MCP).",
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The PDF, inline"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Open anyone's PDF in the browser",
         "tags": [
           "Files"
         ],
@@ -10132,6 +10284,63 @@
           }
         ],
         "summary": "Restore a deleted file",
+        "tags": [
+          "Files"
+        ]
+      },
+      "x-feature": "files"
+    },
+    "/api/files/{file_id}/view": {
+      "get": {
+        "description": "The same file as .../download, but a PDF (pdf_state ok) comes inline as application/pdf, so a browser shows it in its own viewer. Any other file still comes as an attachment.",
+        "operationId": "get_api_files_file_id_view",
+        "parameters": [
+          {
+            "description": "The file's id, from GET /api/files (files_list over MCP).",
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The PDF, inline"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Open one of your PDFs in the browser",
         "tags": [
           "Files"
         ]

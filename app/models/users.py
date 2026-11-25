@@ -94,6 +94,9 @@ class User:
     # Where this person's tools run: "*" is their default, a tool id its own
     # override. See app/models/tool_modes.py.
     tool_modes: dict[str, str] = field(default_factory=dict)
+    # What a PDF link does for this person: "open" (the default) in a new tab
+    # in the browser's own viewer, or "download". See app/models/pdf_links.py.
+    pdf_links: str = ""
     # This person's own list on the Appearance screen; None follows the app's
     # defaults; themes_builtins is which built-in themes it has seen. theme_id
     # is the one they use. See app/models/themes.py.
@@ -137,6 +140,7 @@ class User:
             "recovery_hashes": self.recovery_hashes,
             "shortcuts": self.shortcuts,
             "tool_modes": self.tool_modes,
+            "pdf_links": self.pdf_links,
             "themes": self.themes,
             "themes_builtins": self.themes_builtins,
             "theme_id": self.theme_id,
@@ -158,6 +162,7 @@ class User:
             recovery_hashes=record.get("recovery_hashes", []),
             shortcuts=record.get("shortcuts") or {},
             tool_modes=record.get("tool_modes") or {},
+            pdf_links=record.get("pdf_links", ""),
             themes=record.get("themes"),
             themes_builtins=record.get("themes_builtins", 0),
             theme_id=record.get("theme_id", ""),

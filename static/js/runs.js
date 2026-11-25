@@ -198,11 +198,8 @@ const Runs = {
       Dom.el( "span" , { class: "text-break flex-grow-1" , text: file.name } ),
       Dom.el( "span" , { class: "small text-body-secondary text-nowrap" , text: I18n.get( "runs.section_pages" ).replace( "{count}" , file.pages ) } ),
       Dom.el( "span" , { class: "small text-body-secondary text-nowrap" , text: Files.size( file.size ) } ),
-      Dom.el( "a" , {
-        class: "btn btn-sm btn-outline-secondary",
-        text: I18n.get( "files.download_button" ),
-        attrs: { href: Api.fileDownloadPath( file.id ) , download: file.name },
-      } ),
+      PdfLinks.link( Dom.el( "a" , { class: "btn btn-sm btn-outline-secondary" , attrs: { "data-label": "button" } } ) ,
+        Api.fileViewPath( file.id ) , Api.fileDownloadPath( file.id ) , file.name ),
     ] } ) );
     if ( !detail ) items.push( Dom.el( "li" , { class: "list-group-item px-0 text-body-secondary" , text: I18n.get( "runs.loading" ) } ) );
     const list = Dom.el( "ul" , { class: "list-group list-group-flush small" , children: items } );

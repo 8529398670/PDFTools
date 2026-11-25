@@ -80,7 +80,11 @@ def files_download_url(call: Call, body: Any, serve: Callable[[Any, Any], Any]) 
     row = files.get_my_file.__declared__.serve(call.request, body)
     if row.state != files.models.READY:
         raise Refusal("that file has not finished uploading")
-    return {"id": body.file_id, "name": row.name, "size": row.size, "url": file_url(call, f"/api/files/{body.file_id}/download")}
+    return {
+        "id": body.file_id, "name": row.name, "size": row.size,
+        "url": file_url(call, f"/api/files/{body.file_id}/download"),
+        "view_url": file_url(call, f"/api/files/{body.file_id}/view"),
+    }
 
 
 def build_registry() -> Registry:

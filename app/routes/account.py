@@ -19,7 +19,7 @@ from app.core.security import actor_from, clear_session_cookie, decrypt_cookie
 from app.models import login_tokens, sessions, users
 from app.models import to_iso
 from app.models import api_keys
-from app.models import themes
+from app.models import pdf_links, themes
 from app.models import two_factor
 from app.routes.api_docs_md import api_doc_url
 from app.routes.api_docs_md import mcp_doc_url
@@ -76,6 +76,7 @@ class Me(Reply, kw_only=True):
     mcp_doc_url: Annotated[str, Meta(description="Where to read the MCP tools as a page for people: config/mcp.md in app.repo, or /docs/mcp when there is no repo.", extra_json_schema={"x-feature": "mcp"})]
     shortcuts: Annotated[dict[str, str], Meta(description="The keyboard shortcuts you changed, by action. Mod is Cmd on a Mac and Ctrl elsewhere.", extra_json_schema={"x-feature": "shortcuts"})]
     tool_modes: Annotated[dict[str, str], Meta(description="Where your tools run: \"*\" is your default, and a tool id its own override; each is auto, device or server. Missing: auto, and a tool follows your default.")]
+    pdf_links: Annotated[Literal["open", "download"], Meta(description="What a PDF link does for you: open (the default) shows it in a new tab in the browser's own viewer, through GET /api/files/{file_id}/view; download saves it, through .../download.")]
     themes: Annotated[list[Theme] | None, Meta(description="Your themes (see the Theme schema): your own list, else the app's defaults, else null for the built-in ones.", extra_json_schema={"x-feature": "appearance"})]
     themes_custom: Annotated[bool, Meta(description="Whether you have your own list rather than following the defaults.", extra_json_schema={"x-feature": "appearance"})]
     themes_builtins: Annotated[int, Meta(description="Which built-in themes that list has seen (see builtins on POST /api/account/themes).", extra_json_schema={"x-feature": "appearance"})]
@@ -145,6 +146,7 @@ def me(request: Request) -> Me:
         mcp_doc_url=mcp_doc_url(cfg),
         shortcuts=actor.user.shortcuts,
         tool_modes=actor.user.tool_modes,
+        pdf_links=pdf_links.effective(actor.user.pdf_links),  # type: ignore[arg-type]
         themes=theme_list(my_themes),
         themes_custom=themes_custom,
         themes_builtins=themes_builtins,

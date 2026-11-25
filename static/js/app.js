@@ -195,6 +195,7 @@ const App = {
     // Tools first: the tool screens read where they run from it.
     Tools.init( me );
     ToolModes.init( me );
+    PdfLinks.init( me );
     Local.init( me );
     Chain.init( me );
     loading.push( Runs.init( me ) );
