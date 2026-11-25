@@ -506,7 +506,8 @@ const Local = {
   restartable( job ) {
     if ( this.running || ![ "cancelled" , "failed" ].includes( job.state ) ) return false;
     if ( this.where === "server" ) return Boolean( job.runId || job.chainId );
-    return Boolean( this.steps && job.info && ( !this.needsBookmarks( this.steps ) || job.info.bookmarks > 0 ) );
+    const steps = job.steps || this.steps;
+    return Boolean( steps && job.info && ( !this.needsBookmarks( steps ) || job.info.bookmarks > 0 ) );
   },
 
   async restart( job ) {
@@ -525,19 +526,54 @@ const Local = {
         this.setState( job , "queued" );
         await this.follow();
       } else {
-        await this.runOne( job , this.steps );
+        await this.runOne( job , job.steps || this.steps );
       }
     } );
   },
 
-  // Remove watermarks, again, taking out just the findings picked from
-  // the last run's list: here, or as a new run on the server's copy (a
-  // check keeps the upload for this; see Action.keeps_upload).
-  async removePicked( job , ids ) {
-    if ( this.running ) return;
-    const options = Object.assign( {} , this.steps ? this.steps[ 0 ].options : {} , { mode: "remove" , picked: ids } );
-    const steps = [ { action: "remove_watermarks" , options } ];
-    this.steps = steps;
+  // ---- with other options ----------------------------------------------------
+
+  rerunnable( job ) {
+    return !this.running && job.state === "done" && Boolean( job.file );
+  },
+
+  // A finished PDF run again from its original: a tool's options asked for
+  // anew (starting from the ones it ran with), a chain's steps as the chain
+  // screen has them now. Its earlier files stay on Runs (server) or were
+  // already saved; the row shows the new run's.
+  async rerun( job ) {
+    if ( !this.rerunnable( job ) ) return;
+    let steps;
+    if ( this.batchTool === "chain" ) {
+      steps = typeof Chain !== "undefined" ? Chain.steps() : [];
+      if ( !steps.length ) {
+        Dom.toast( I18n.get( "chain.empty" ) , "error" );
+        return;
+      }
+    } else {
+      const ran = ( job.steps || this.steps || [ {} ] )[ 0 ];
+      const action = this.batchTool;
+      const options = await ToolOptions.ask( action , [ job ] , Object.assign( {} , ran.options || {} , { picked: [] } ) );
+      if ( !options ) return;
+      this.lastOptions = Object.assign( {} , this.lastOptions || {} , { [ action ]: options } );
+      steps = [ { action , options } ];
+    }
+    if ( this.needsBookmarks( steps ) && job.info && job.info.bookmarks === 0 ) {
+      Dom.toast( I18n.get( "local.errors.no_bookmarks" ) , "error" );
+      return;
+    }
+    if ( this.where === "device" && this.engine( steps ) === "server" ) {
+      // This batch's PDFs were never uploaded: an option only the server has
+      // means dropping the PDF again, which sends it there.
+      Dom.toast( I18n.get( "local.errors.server_only" ) , "error" );
+      return;
+    }
+    await this.again( job , steps );
+  },
+
+  // Runs steps on job's original, where the batch runs.
+  async again( job , steps ) {
+    job.steps = steps;
     job.outputs = [];
     job.fraction = 0;
     job.result = null;
@@ -545,23 +581,61 @@ const Local = {
       Dom.swap( job.row.list );
       job.row.shown = 0;
     }
-    Dom.toast( I18n.get( "watermarks.started" ) , "ok" );
     await this.busy( async () => {
-      if ( this.where === "server" ) {
-        const started = await Api.startActionMany( [ job.id ] , "remove_watermarks" , options );
-        const one = started.runs.find( ( item ) => item.file_id === job.id );
-        if ( !one ) {
-          const refused = started.skipped.find( ( item ) => item.file_id === job.id );
-          this.setState( job , "failed" , refused ? refused.error : "source_gone" );
-          return;
-        }
-        job.runId = one.id;
-        this.setState( job , "queued" );
-        await this.follow();
-      } else {
-        await this.runOne( job , steps );
-      }
+      if ( this.where === "server" ) await this.runOnServer( job , steps );
+      else await this.runOne( job , steps );
     } );
+  },
+
+  // A new run (or chain) of steps on job's upload. When the upload went once
+  // its last run was done, the PDF this page still holds is sent again.
+  async runOnServer( job , steps ) {
+    const chain = this.batchTool === "chain";
+    const start = async () => {
+      if ( !job.id ) return null;
+      const started = chain
+        ? await Api.startChains( [ job.id ] , steps )
+        : await Api.startActionMany( [ job.id ] , steps[ 0 ].action , steps[ 0 ].options );
+      return { one: ( started.chains || started.runs ).find( ( item ) => item.file_id === job.id ) , started };
+    };
+    let answer = await start();
+    if ( !answer || !answer.one ) {
+      Object.assign( job , { id: null , state: "sending" , sent: 0 , checked: 0 , keep: Dom.get( "local-keep" ).value , tool: true ,
+        onPaint: ( one ) => this.uploadPainted( one ) } );
+      this.paintJob( job );
+      try {
+        await Library.upload( job );
+      } catch ( error ) {
+        this.setState( job , "failed" , "upload" );
+        return;
+      }
+      Library.refreshSoon();
+      this.setState( job , "reading" );
+      await this.waitRead( job , this.needsBookmarks( steps ) );
+      if ( job.state !== "waiting" ) return;
+      answer = await start();
+    }
+    if ( !answer || !answer.one ) {
+      const refused = answer && answer.started.skipped.find( ( item ) => item.file_id === job.id );
+      this.setState( job , "failed" , refused ? refused.error : "source_gone" );
+      return;
+    }
+    job.runId = chain ? null : answer.one.id;
+    job.chainId = chain ? answer.one.id : null;
+    this.setState( job , "queued" );
+    await this.follow();
+  },
+
+  // Remove watermarks, again, taking out just the findings picked from
+  // the last run's list: here, or as a new run on the server's copy (a
+  // check keeps the upload for this; see Action.keeps_upload, and if it is
+  // gone anyway, runOnServer sends the PDF again).
+  async removePicked( job , ids ) {
+    if ( this.running ) return;
+    const ran = ( job.steps || this.steps || [ {} ] )[ 0 ];
+    const options = Object.assign( {} , ran.options || {} , { mode: "remove" , picked: ids } );
+    Dom.toast( I18n.get( "watermarks.started" ) , "ok" );
+    await this.again( job , [ { action: "remove_watermarks" , options } ] );
   },
 
   async inspectAll( bookmarks ) {
@@ -755,6 +829,16 @@ const Local = {
       ],
       on: { click: () => this.restart( job ) },
     } );
+    // A finished PDF, run again from its original with other options.
+    const rerun = Dom.el( "button" , {
+      class: "btn btn-sm btn-outline-primary py-0",
+      attrs: { type: "button" },
+      children: [
+        Dom.el( "i" , { class: "bi bi-sliders me-1" , attrs: { "aria-hidden": "true" } } ),
+        Dom.el( "span" , { text: I18n.get( "local.rerun" ) } ),
+      ],
+      on: { click: () => this.rerun( job ) },
+    } );
     const bar = Dom.el( "progress" , { class: "w-100" , attrs: { max: "1" , value: "0" , "aria-label": job.file.name } } );
     const note = Dom.el( "div" , { class: "text-body-secondary" } );
     const list = Dom.el( "ul" , { class: "list-unstyled mb-0 mt-1" } );
@@ -763,10 +847,10 @@ const Local = {
     // Remove watermarks' findings, to pick from (js/watermarks.js).
     const findings = Dom.el( "div" );
     const element = Dom.el( "li" , { class: "list-group-item px-0" , children: [
-      Dom.el( "div" , { class: "d-flex flex-wrap align-items-center gap-2" , children: [ name , status , again ] } ),
+      Dom.el( "div" , { class: "d-flex flex-wrap align-items-center gap-2" , children: [ name , status , again , rerun ] } ),
       bar, note, findings, details,
     ] } );
-    job.row = { element , status , bar , note , list , summary , details , again , findings , findingsFor: null , shown: 0 };
+    job.row = { element , status , bar , note , list , summary , details , again , rerun , findings , findingsFor: null , shown: 0 };
     this.paintJob( job );
     return element;
   },
@@ -793,6 +877,7 @@ const Local = {
     row.bar.value = job.state === "done" ? 1 : job.fraction;
     Dom.show( row.bar , [ "splitting" , "checking" , "sending" ].includes( job.state ) );
     Dom.show( row.again , this.restartable( job ) );
+    Dom.show( row.rerun , this.rerunnable( job ) );
     const notes = [];
     if ( job.result && job.result.folded ) notes.push( I18n.get( "local.folded" ).replace( "{count}" , job.result.folded ) );
     if ( job.result && job.result.nowhere ) notes.push( I18n.get( "local.nowhere" ).replace( "{count}" , job.result.nowhere ) );

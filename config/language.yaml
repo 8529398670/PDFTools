@@ -752,6 +752,8 @@ local:
   keep_day: "kept for 24 hours"
   keep_policy: "kept as your retention setting says"
   restart: "Restart"
+  # A finished PDF, run again from its original with other options.
+  rerun: "Run again"
   downloading: "Downloading {name}."
   download_again: "Download again"
   ready: "{count} files are ready."
@@ -912,6 +914,8 @@ runs:
   hide_button: "Hide files"
   delete_button: "Delete"
   restart_button: "Restart"
+  rerun_button: "Run again"
+  rerun_gone: "The server no longer keeps this PDF. Drop it on the tool's screen again to run it with other options."
   # A run that is a step of a chain. {step} counts from 1.
   chain_step: "chain step {step}"
   section_pages: "{count} pages"

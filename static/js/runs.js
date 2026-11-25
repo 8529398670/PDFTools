@@ -164,6 +164,15 @@ const Runs = {
       ],
       on: { click: () => this.restart( one ) },
     } ) : null;
+    // A finished run started again on the same PDF, with other options.
+    const rerun = one.state === "done" && !one.chain_id ? Dom.el( "button" , {
+      class: "btn btn-sm btn-outline-primary",
+      children: [
+        Dom.el( "i" , { class: "bi bi-sliders me-1" , attrs: { "aria-hidden": "true" } } ),
+        Dom.el( "span" , { text: I18n.get( "runs.rerun_button" ) } ),
+      ],
+      on: { click: () => this.rerun( one ) },
+    } ) : null;
     const remove = Dom.el( "button" , {
       class: "btn btn-sm btn-outline-danger",
       text: I18n.get( "runs.delete_button" ),
@@ -178,7 +187,7 @@ const Runs = {
       Dom.el( "td" , { class: "runs-state" , children: this.stateCell( one ) } ),
       Dom.el( "td" , { class: "text-nowrap" , text: made } ),
       Dom.el( "td" , { class: "text-nowrap" , children: [ Dom.when( one.created_at ) ] } ),
-      Dom.el( "td" , { class: "text-nowrap" , children: [ Dom.rowActions( one.file_name , [ zip , restart , toggle , cancel , remove ] , 2 ) ] } ),
+      Dom.el( "td" , { class: "text-nowrap" , children: [ Dom.rowActions( one.file_name , [ zip , restart , rerun , toggle , cancel , remove ] , 2 ) ] } ),
     ] } );
   },
 
@@ -229,6 +238,30 @@ const Runs = {
   async toggle( one ) {
     if ( this.open.has( one.id ) ) this.open.delete( one.id );
     else this.open.add( one.id );
+    await this.refresh();
+  },
+
+  // Asks for the options again, starting from the ones it ran with, and
+  // starts a new run on its PDF, if the server still keeps that PDF.
+  async rerun( one ) {
+    let file;
+    try {
+      file = await Api.file( one.file_id );
+    } catch ( error ) {
+      file = null;
+    }
+    if ( !file || file.state !== "ready" || file.pdf_state !== "ok" ) {
+      App.showError( I18n.get( "runs.rerun_gone" ) );
+      return;
+    }
+    const job = { file: { name: one.file_name } , info: { levels: file.levels , bookmarks: file.bookmarks , pages: file.pages } };
+    const options = await ToolOptions.ask( one.action , [ job ] , Object.assign( {} , one.options || {} , { picked: [] } ) );
+    if ( !options ) return;
+    try {
+      await Api.startAction( one.file_id , one.action , options );
+    } catch ( error ) {
+      App.showError( error.message );
+    }
     await this.refresh();
   },
 
