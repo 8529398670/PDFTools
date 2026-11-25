@@ -248,7 +248,8 @@ const LocalSplit = {
 
   // ---- the whole split -------------------------------------------------------
 
-  // split_bookmarks.run. Sections are written into work. hooks:
+  // split_bookmarks.run. Sections are written into work, their names after
+  // hooks.prefix when it is set (a chain's step, so steps never collide). hooks:
   // progress(fraction, name), cancelled(), output(name, path, meta) -- which
   // takes the file away before the next section is written. qpdf.prepare(path)
   // is awaited before each file qpdf writes (see LocalQpdf.prepare).
@@ -266,9 +267,10 @@ const LocalSplit = {
     for ( const section of sections ) {
       if ( hooks.cancelled() ) throw new Error( "cancelled" );
       const name = this.fileName( section , number , width , options.numbered );
-      const target = work + "/" + String( number ).padStart( 5 , "0" ) + ".pdf";
+      const prefix = hooks.prefix || "";
+      const target = work + "/" + prefix + String( number ).padStart( 5 , "0" ) + ".pdf";
       if ( options.inner_bookmarks ) {
-        const pagesOnly = work + "/" + String( number ).padStart( 5 , "0" ) + ".pages.pdf";
+        const pagesOnly = work + "/" + prefix + String( number ).padStart( 5 , "0" ) + ".pages.pdf";
         await qpdf.prepare( pagesOnly );
         this.extract( qpdf , source , section.first , section.last , pagesOnly );
         try {

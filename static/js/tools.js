@@ -9,10 +9,13 @@
 //
 // Where a tool runs is the account's choice (me.tool_modes, set on Account
 // with js/tool_modes.js): its own override, else the account's default ("*"),
-// else Automatic. Tools.mode answers that; Tools.where resolves Automatic on
-// this device.
+// else Automatic. Tools.mode answers that. Where it runs is never shown on
+// the cards: the choice lives on Account.
 const Tools = {
   catalog: [
+    { id: "chain" , tools: [
+      { id: "chain" , icon: "bi-link-45deg" , ready: true },
+    ] },
     { id: "split" , tools: [
       { id: "extract_pages" , icon: "bi-file-earmark-arrow-up" },
       { id: "delete_pages" , icon: "bi-file-earmark-x" },
@@ -32,8 +35,8 @@ const Tools = {
       { id: "images_to_pdf" , icon: "bi-images" },
     ] },
     { id: "other" , tools: [
-      { id: "compress" , icon: "bi-file-zip" },
-      { id: "rotate" , icon: "bi-arrow-clockwise" },
+      { id: "compress" , icon: "bi-file-zip" , ready: true },
+      { id: "rotate" , icon: "bi-arrow-clockwise" , ready: true },
       { id: "crop" , icon: "bi-crop" },
       { id: "protect" , icon: "bi-lock" },
       { id: "unprotect" , icon: "bi-unlock" },
@@ -93,16 +96,7 @@ const Tools = {
     return I18n.get( "tool_modes." + mode );
   },
 
-  // Where it would run on this device now: "device" or "server".
-  where( id ) {
-    const device = Local.device();
-    const mode = this.mode( id );
-    if ( !device.supported || mode === "server" ) return "server";
-    if ( mode === "device" ) return "device";
-    return device.capable ? "device" : "server";
-  },
-
-  // After Account saved new modes: the badges here and the tool screens follow.
+  // After Account saved new modes: the tool screens follow.
   changed( modes ) {
     if ( this.me ) this.me.tool_modes = modes;
     this.render();
@@ -149,19 +143,7 @@ const Tools = {
   },
 
   toolCard( tool ) {
-    const badges = Dom.el( "div" , { class: "d-flex flex-wrap gap-1 mt-2" } );
-    if ( tool.ready ) {
-      const here = this.where( tool.id ) === "device";
-      badges.appendChild( Dom.el( "span" , {
-        class: "badge " + ( here ? "text-bg-success" : "text-bg-info" ),
-        children: [
-          Dom.el( "i" , { class: "bi me-1 " + ( here ? "bi-cpu" : "bi-cloud" ) , attrs: { "aria-hidden": "true" } } ),
-          document.createTextNode( I18n.get( here ? "tools.where_device" : "tools.where_server" ) ),
-        ],
-      } ) );
-    } else {
-      badges.appendChild( Dom.badge( I18n.get( "tools.todo" ) , "warning" ) );
-    }
+    const badges = tool.ready ? null : Dom.el( "div" , { class: "d-flex flex-wrap gap-1 mt-2" , children: [ Dom.badge( I18n.get( "tools.todo" ) , "warning" ) ] } );
     const body = Dom.el( "div" , {
       class: "card-body d-flex gap-3",
       children: [
@@ -171,7 +153,7 @@ const Tools = {
           children: [
             Dom.el( "h4" , { class: "h6 card-title mb-1" , text: this.title( tool.id ) } ),
             Dom.el( "p" , { class: "card-text small text-body-secondary mb-0" , text: I18n.get( "tools.items." + tool.id + ".help" ) } ),
-            badges,
+            ...( badges ? [ badges ] : [] ),
           ],
         } ),
       ],

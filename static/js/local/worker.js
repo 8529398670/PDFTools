@@ -1,5 +1,5 @@
 // The browser's action worker: qpdf (WebAssembly) on files that never leave
-// this device. Started by static/js/local.js, one at a time; stopping a split
+// this device. Started by static/js/local.js, one at a time; stopping a run
 // is terminating this worker, since qpdf cannot be interrupted mid-call.
 //
 // Memory stays flat however big the source:
@@ -11,11 +11,24 @@
 //   Blobs, one at a time.
 //
 // Messages in:  { type: "inspect" , file }
-//               { type: "split" , file , options , store , batch , job }
+//               { type: "run" , file , steps: [ { action , options } ] , store , batch , job }
+//               One step is a tool on its own; more are a chain, each step run
+//               on every file the step before made (a split's sections, say).
 // Messages out: { type: "info" , info }  { type: "progress" , fraction , name }
 //               { type: "output" , name , meta , size , stored: [ job , key ] | blob }
+//               (the last step's files only: a chain's in-between files stay
+//               on the private disk until the chain ends, then go)
 //               { type: "done" , result }  { type: "error" , code , detail }
-importScripts( "/vendor/qpdf/qpdf.js" , "/js/local/split_bookmarks.js" , "/js/local/opfs_fs.js" );
+importScripts( "/vendor/qpdf/qpdf.js" , "/js/local/split_bookmarks.js" , "/js/local/opfs_fs.js" ,
+  "/js/local/pages.js" , "/js/local/rotate.js" , "/js/local/compress.js" );
+
+// Each tool's browser twin, by action name. run( qpdf , source , work ,
+// options , hooks , sourceName ) answers the action's result.
+const TOOLS = {
+  split_bookmarks: ( qpdf , source , work , options , hooks ) => LocalSplit.split( qpdf , source , work , options , hooks ),
+  rotate: ( ...args ) => LocalRotate.run( ...args ),
+  compress: ( ...args ) => LocalCompress.run( ...args ),
+};
 
 let qpdfReady = null;
 
@@ -69,10 +82,12 @@ function bytesOf( FS , path ) {
   return node.contents ? node.contents.subarray( 0 , node.usedBytes ) : new Uint8Array( 0 );
 }
 
-// Sections are written by qpdf straight into the file's OPFS folder (OpfsFS),
-// and the page reads them from there. Without OPFS they are written into
-// memory and sent back as Blobs.
-async function split( message ) {
+// Every file is written by qpdf straight into the file's OPFS folder
+// (OpfsFS), and the page reads the last step's from there. Without OPFS they
+// are written into memory and the last step's go back as Blobs.
+async function runSteps( message ) {
+  const steps = message.steps || [];
+  for ( const step of steps ) if ( !TOOLS[ step.action ] ) throw new Error( "unknown_action" );
   const folder = await store( message );
   await withFile( message.file , async ( loaded , source ) => {
     const FS = loaded.module.FS;
@@ -85,23 +100,46 @@ async function split( message ) {
       work = "/out";
       loaded.preparer = ( path ) => disk.prepare( path );
     }
+    // A chain's in-between files, removed when it ends.
+    const between = [];
     try {
-      const result = await LocalSplit.split( loaded , source , work , message.options , {
-        progress: ( fraction , name ) => postMessage( { type: "progress" , fraction , name } ),
-        cancelled: () => false,
-        async output( name , path , meta ) {
-          if ( disk ) {
-            const key = await disk.release( path );
-            postMessage( { type: "output" , name , meta , stored: [ message.job , key ] , size: disk.root.contents[ key ].size } );
-          } else {
-            const blob = new Blob( [ bytesOf( FS , path ) ] , { type: "application/pdf" } );
-            FS.unlink( path );
-            postMessage( { type: "output" , name , meta , blob , size: blob.size } );
-          }
-        },
-      } );
-      postMessage( { type: "done" , result } );
+      let inputs = [ { path: source , name: message.file.name } ];
+      const results = [];
+      for ( let index = 0 ; index < steps.length ; index++ ) {
+        const last = index === steps.length - 1;
+        const made = [];
+        let stepResult = null;
+        for ( let at = 0 ; at < inputs.length ; at++ ) {
+          const input = inputs[ at ];
+          const share = 1 / steps.length / inputs.length;
+          const base = index / steps.length + at * share;
+          const hooks = {
+            prefix: steps.length > 1 ? "s" + index + "-" + at + "-" : "",
+            progress: ( fraction , name ) => postMessage( { type: "progress" , fraction: base + fraction * share , name } ),
+            cancelled: () => false,
+            async output( name , path , meta ) {
+              if ( !last ) {
+                made.push( { path: path , name: name } );
+                between.push( path );
+              } else if ( disk ) {
+                const key = await disk.release( path );
+                postMessage( { type: "output" , name , meta , stored: [ message.job , key ] , size: disk.root.contents[ key ].size } );
+              } else {
+                const blob = new Blob( [ bytesOf( FS , path ) ] , { type: "application/pdf" } );
+                FS.unlink( path );
+                postMessage( { type: "output" , name , meta , blob , size: blob.size } );
+              }
+            },
+          };
+          stepResult = await TOOLS[ steps[ index ].action ]( loaded , input.path , work , steps[ index ].options || {} , hooks , input.name );
+          if ( index > 0 ) loaded.remove( input.path );
+        }
+        results.push( stepResult );
+        inputs = made;
+      }
+      postMessage( { type: "done" , result: steps.length === 1 ? results[ 0 ] : { steps: results } } );
     } finally {
+      between.forEach( ( path ) => loaded.remove( path ) );
       loaded.preparer = null;
       if ( disk ) {
         await disk.close();
@@ -118,8 +156,8 @@ self.onmessage = async ( event ) => {
     if ( message.type === "inspect" ) {
       const info = await withFile( message.file , ( loaded , source ) => LocalSplit.inspect( loaded , source ) );
       postMessage( { type: "info" , info } );
-    } else if ( message.type === "split" ) {
-      await split( message );
+    } else if ( message.type === "run" ) {
+      await runSteps( message );
     }
   } catch ( error ) {
     postMessage( { type: "error" , code: error && error.message || "failed" , detail: error && error.detail || "" } );

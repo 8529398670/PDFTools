@@ -78,7 +78,10 @@ def apply_retention(store: db.Store) -> tuple[str, str]:
     bytes once the undo window has passed."""
     expired = retention.expire_due(store)
     swept = runs.sweep_runs(store)
-    return f"expired {expired} files, removed {swept} runs", ""
+    from app.models import chains
+
+    chained = chains.sweep_chains(store)
+    return f"expired {expired} files, removed {swept} runs, {chained} chains", ""
 
 
 def register(registry: Registry, store: db.Store, settings: config_live.Holder, logger: logs.Logger) -> None:

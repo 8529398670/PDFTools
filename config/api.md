@@ -16,6 +16,7 @@ This file is generated: do not edit it. Change the docs next to the handlers and
 - [Owner](#owner)
 - [Monitoring](#monitoring)
 - [Actions](#actions)
+- [Chains](#chains)
 - [Retention](#retention)
 - [Schemas](#schemas)
 
@@ -74,6 +75,7 @@ A link that signs your own account in on a browser or another device. An API key
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`create_my_login_link`](mcp.md#create_my_login_link) |
 | Errors | 400, 401, 403, 429, 503 |
 
 **Request body**
@@ -103,6 +105,7 @@ Void your account's live login link without making a new one. Devices it already
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`cancel_my_login_link`](mcp.md#cancel_my_login_link) |
 | Errors | 400, 401, 403, 429, 503 |
 
 **Request body**
@@ -127,6 +130,7 @@ Change your own display name (1-80 characters). expect, when given, is the name 
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`rename_account`](mcp.md#rename_account) |
 | Errors | 400, 401, 403, 409, 429, 503 |
 
 **Request body**
@@ -153,6 +157,7 @@ Where your account is signed in, a page at a time: id, when it started and was l
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`list_my_sessions`](mcp.md#list_my_sessions) |
 | Errors | 400, 401, 403, 429, 503 |
 
 **Parameters**
@@ -177,6 +182,7 @@ Sign out every other device
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`revoke_my_other_sessions`](mcp.md#revoke_my_other_sessions) |
 | Errors | 400, 401, 403, 429, 503 |
 
 **Request body**
@@ -201,6 +207,7 @@ Give one of your devices a name (at most 80 characters; empty clears it). expect
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`label_my_session`](mcp.md#label_my_session) |
 | Errors | 400, 401, 403, 404, 409, 429, 503 |
 
 **Parameters**
@@ -233,6 +240,7 @@ End one of your signed-in sessions; that browser has to sign in again.
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`revoke_my_session`](mcp.md#revoke_my_session) |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Parameters**
@@ -262,6 +270,7 @@ Replace your changed keyboard shortcuts: action name to binding, such as "search
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`set_shortcuts`](mcp.md#set_shortcuts) |
 | Errors | 400, 401, 403, 429, 503 |
 
 **Request body**
@@ -287,6 +296,7 @@ Switch to another theme from your list (or the defaults), by its id.
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`set_theme`](mcp.md#set_theme) |
 | Errors | 400, 401, 403, 429, 503 |
 
 **Request body**
@@ -312,6 +322,7 @@ Replace your whole list of color themes (1 to 40) and pick the one you use. them
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`set_themes`](mcp.md#set_themes) |
 | Errors | 400, 401, 403, 429, 503 |
 
 **Request body**
@@ -432,6 +443,7 @@ Runs POST /api/account/sessions/{session_id}/revoke once per item: items holds e
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`revoke_my_session_bulk`](mcp.md#revoke_my_session_bulk) |
 | Errors | 400, 401, 403, 429, 503 |
 
 **Request body**
@@ -467,6 +479,7 @@ Sign out
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | None, HTTP only: Ends a browser session; a key has none to end. |
 | Errors | 400, 401, 403, 429, 503 |
 
 **Request body**
@@ -488,6 +501,7 @@ Record what happened on the page
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | None, HTTP only: The browser's own activity reports (track.js), not an action. |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Request body**
@@ -513,6 +527,7 @@ The account this API key belongs to, the role it acts with (role -- never higher
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`whoami`](mcp.md#whoami) |
 | Errors | 401, 429, 503 |
 
 **Reply 200**: Success
@@ -528,6 +543,7 @@ People with an active account, a page at a time: id and display name.
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`list_team`](mcp.md#list_team) |
 | Errors | 400, 401, 429, 503 |
 
 **Parameters**
@@ -788,6 +804,7 @@ Stops the key at once, and every key it made, down the chain. Needs a browser se
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | None, HTTP only: Manages API keys, which no MCP tool does. |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Parameters**
@@ -817,6 +834,7 @@ One account's keys, revoked and expired ones included, newest first. Each row sa
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | None, HTTP only: Manages API keys, which no MCP tool does. |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Parameters**
@@ -840,6 +858,7 @@ Needs a browser session or a key the owner allowed to make keys (may_mint_keys);
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | None, HTTP only: Makes an API key, which no MCP tool does. |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Parameters**
@@ -920,7 +939,8 @@ Gives the calling key a new secret and answers its new credential, shown only no
 |  |  |
 |---|---|
 | Who may call | API key only, anyone signed in |
-| Errors | 400, 403, 404, 429, 503 |
+| MCP tool | None, HTTP only: Makes an API key's credential, which no MCP tool does. |
+| Errors | 400, 401, 403, 404, 429, 503 |
 
 **Request body**
 
@@ -1184,6 +1204,7 @@ How many bytes your files use, and your quota (0 is no limit).
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`my_storage`](mcp.md#my_storage) |
 | Errors | 401, 404, 429, 503 |
 
 **Reply 200**: Success
@@ -1202,6 +1223,7 @@ Every account's files, a page at a time, with whose each one is (user_id, user_n
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_list_files`](mcp.md#admin_list_files) |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Parameters**
@@ -1355,6 +1377,7 @@ How many bytes everyone's files use together as quotas count them, what they tak
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_storage`](mcp.md#admin_storage) |
 | Errors | 401, 403, 404, 429, 503 |
 
 **Reply 200**: Success
@@ -1375,6 +1398,7 @@ Runs POST /api/files/{file_id}/delete once per item: items holds each one's id a
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`files_delete_bulk`](mcp.md#files_delete_bulk) |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Request body**
@@ -1399,6 +1423,7 @@ Runs POST /api/files/{file_id}/restore once per item: items holds each one's id 
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`files_restore_bulk`](mcp.md#files_restore_bulk) |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Request body**
@@ -1482,6 +1507,7 @@ Your uploaded files, a page at a time: id, name, type, size, state (uploading or
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`files_list`](mcp.md#files_list) |
 | Errors | 400, 401, 404, 429, 503 |
 
 **Parameters**
@@ -1511,6 +1537,7 @@ Then send every piece, in any order and several at once, and finish. A file over
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`files_start_upload`](mcp.md#files_start_upload) |
 | Errors | 400, 401, 403, 404, 409, 429, 503 |
 
 **Request body**
@@ -1559,6 +1586,7 @@ One file: its details, and for an unfinished upload which pieces are still to se
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`files_get`](mcp.md#files_get) |
 | Errors | 400, 401, 404, 429, 503 |
 
 **Parameters**
@@ -1602,6 +1630,7 @@ The body is the raw bytes. Pieces may come in any order and several at once; sen
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | None, HTTP only: File bytes: MCP messages are JSON, and clients cap their size. |
 | Errors | 400, 401, 403, 404, 409, 429, 503 |
 
 **Parameters**
@@ -1631,6 +1660,7 @@ Move one of your files to the bin. It can be restored for ten minutes; after tha
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`files_delete`](mcp.md#files_delete) |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Parameters**
@@ -1658,6 +1688,7 @@ Download one of your files
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`files_download_url`](mcp.md#files_download_url) |
 | Errors | 400, 401, 404, 429, 503 |
 
 **Parameters**
@@ -1679,6 +1710,7 @@ Seal an upload once every piece has arrived; the file is then ready to download.
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`files_finish_upload`](mcp.md#files_finish_upload) |
 | Errors | 400, 401, 403, 404, 409, 429, 503 |
 
 **Parameters**
@@ -1706,6 +1738,7 @@ Give one of your files a new name. expect, when given, is the name you think it 
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`files_rename`](mcp.md#files_rename) |
 | Errors | 400, 401, 403, 404, 409, 429, 503 |
 
 **Parameters**
@@ -1738,6 +1771,7 @@ Bring back a file you deleted, while it is still in the bin and your storage quo
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`files_restore`](mcp.md#files_restore) |
 | Errors | 400, 401, 403, 404, 409, 429, 503 |
 
 **Parameters**
@@ -1792,6 +1826,7 @@ The theme list everyone without their own list sees. themes is null while the bu
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_get_theme_defaults`](mcp.md#admin_get_theme_defaults) |
 | Errors | 401, 403, 404, 429, 503 |
 
 **Reply 200**: Success
@@ -1810,6 +1845,7 @@ Replace the theme list everyone without their own list sees, 1 to 40 themes in t
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_set_theme_defaults`](mcp.md#admin_set_theme_defaults) |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Request body**
@@ -1837,6 +1873,7 @@ Accounts, a page at a time, including disabled ones, with each one's role and wh
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_list_users`](mcp.md#admin_list_users) |
 | Errors | 400, 401, 403, 429, 503 |
 
 **Parameters**
@@ -1866,6 +1903,7 @@ Make a new account and its first login link, to hand to the person. role is admi
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_create_user`](mcp.md#admin_create_user) |
 | Errors | 400, 401, 403, 429, 503 |
 
 **Request body**
@@ -1900,6 +1938,7 @@ Void an account's live login link without making a new one: a link that went som
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_cancel_login_link`](mcp.md#admin_cancel_login_link) |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Parameters**
@@ -1930,6 +1969,7 @@ Remove an account for good, with its sessions, login link and API keys.
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_delete_user`](mcp.md#admin_delete_user) |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Parameters**
@@ -1960,6 +2000,7 @@ Switch an account off (disabled: true) or back on (false). Disabling signs it ou
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_set_user_disabled`](mcp.md#admin_set_user_disabled) |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Parameters**
@@ -1990,6 +2031,7 @@ expires_at is when the account stops working (RFC 3339), or null for never. Once
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_set_user_expiry`](mcp.md#admin_set_user_expiry) |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Parameters**
@@ -2021,6 +2063,7 @@ For someone who lost their device or their link: a fresh login link for their ac
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_reissue_login`](mcp.md#admin_reissue_login) |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Parameters**
@@ -2056,6 +2099,7 @@ Change another account's display name (1-80 characters). Only the owner renames 
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_rename_user`](mcp.md#admin_rename_user) |
 | Errors | 400, 401, 403, 404, 409, 429, 503 |
 
 **Parameters**
@@ -2088,6 +2132,7 @@ For someone who lost both their phone and their recovery codes: switches their t
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_reset_two_factor`](mcp.md#admin_reset_two_factor) |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Parameters**
@@ -2117,6 +2162,7 @@ For an account that may be compromised: ends every session and voids its live lo
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_revoke_access`](mcp.md#admin_revoke_access) |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Parameters**
@@ -2147,6 +2193,7 @@ Make an account an admin, an ordinary user, or a viewer, who may read but change
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_set_user_role`](mcp.md#admin_set_user_role) |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Parameters**
@@ -2178,6 +2225,7 @@ Where an account is signed in: every session, with when it started and was last 
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_list_user_sessions`](mcp.md#admin_list_user_sessions) |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Parameters**
@@ -2203,6 +2251,7 @@ Sign out one of an account's devices
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_revoke_user_session`](mcp.md#admin_revoke_user_session) |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Parameters**
@@ -2233,6 +2282,7 @@ Runs POST /api/admin/users/{user_id}/cancel-login-link once per item: items hold
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_cancel_login_link_bulk`](mcp.md#admin_cancel_login_link_bulk) |
 | Errors | 400, 401, 403, 429, 503 |
 
 **Request body**
@@ -2257,6 +2307,7 @@ Runs POST /api/admin/users/{user_id}/delete once per item: items holds each one'
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_delete_user_bulk`](mcp.md#admin_delete_user_bulk) |
 | Errors | 400, 401, 403, 429, 503 |
 
 **Request body**
@@ -2281,6 +2332,7 @@ Runs POST /api/admin/users/{user_id}/disabled once per item: items holds each on
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_set_user_disabled_bulk`](mcp.md#admin_set_user_disabled_bulk) |
 | Errors | 400, 401, 403, 429, 503 |
 
 **Request body**
@@ -2307,6 +2359,7 @@ Runs POST /api/admin/users/{user_id}/reset-two-factor once per item: items holds
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_reset_two_factor_bulk`](mcp.md#admin_reset_two_factor_bulk) |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Request body**
@@ -2331,6 +2384,7 @@ Runs POST /api/admin/users/{user_id}/revoke-access once per item: items holds ea
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_revoke_access_bulk`](mcp.md#admin_revoke_access_bulk) |
 | Errors | 400, 401, 403, 429, 503 |
 
 **Request body**
@@ -2355,6 +2409,7 @@ Runs POST /api/admin/users/{user_id}/role once per item: items holds each one's 
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_set_user_role_bulk`](mcp.md#admin_set_user_role_bulk) |
 | Errors | 400, 401, 403, 429, 503 |
 
 **Request body**
@@ -2381,6 +2436,7 @@ Runs POST /api/admin/users/{user_id}/sessions/{session_id}/revoke once per item:
 |  |  |
 |---|---|
 | Who may call | browser session or API key, admins |
+| MCP tool | [`admin_revoke_user_session_bulk`](mcp.md#admin_revoke_user_session_bulk) |
 | Errors | 400, 401, 403, 429, 503 |
 
 **Request body**
@@ -2750,7 +2806,12 @@ Save settings
 | GET | [`/api/api.json`](#get-apiapijson) | This document | browser session or API key, anyone signed in |
 | GET | [`/api/api.md`](#get-apiapimd) | The API reference as Markdown tables for people | browser session or API key, anyone signed in |
 | GET | [`/api/health`](#get-apihealth) | Is the process up | anyone |
+| GET | [`/api/mcp.json`](#get-apimcpjson) | The MCP tools: every tool /mcp has, its arguments, and the route it stands for | browser session or API key, anyone signed in |
+| GET | [`/api/mcp.md`](#get-apimcpmd) | The MCP tools as Markdown tables for people | browser session or API key, anyone signed in |
 | GET | [`/api/ready`](#get-apiready) | Can the server do real work | anyone |
+| GET | [`/mcp`](#get-mcp) | Refused: this server has no stream | anyone |
+| POST | [`/mcp`](#post-mcp) | Model Context Protocol, at the key's role | API key only, anyone signed in |
+| DELETE | [`/mcp`](#delete-mcp) | Refused: this server keeps no sessions | anyone |
 
 ### GET /api/api.json
 
@@ -2759,6 +2820,7 @@ This document
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | None, HTTP only: The API reference itself; GET /api/mcp.json is the MCP one. |
 | Errors | 401, 404, 429, 503 |
 
 **Reply 200**: Success
@@ -2772,6 +2834,7 @@ The API reference as Markdown tables for people
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | None, HTTP only: The API reference itself, for people; GET /api/api.json is the same as JSON. |
 | Errors | 401, 404, 429, 503 |
 
 **Reply 200**: Success
@@ -2793,6 +2856,34 @@ Is the process up
 |---|---|---|---|---|
 | `ok` | boolean | yes |  |  |
 
+### GET /api/mcp.json
+
+The MCP tools: every tool /mcp has, its arguments, and the route it stands for
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| MCP tool | None, HTTP only: The MCP reference itself; tools/list gives the same list. |
+| Errors | 401, 404, 429, 503 |
+
+**Reply 200**: Success
+
+An empty object.
+
+### GET /api/mcp.md
+
+The MCP tools as Markdown tables for people
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| MCP tool | None, HTTP only: The MCP reference itself, for people; tools/list gives the same list. |
+| Errors | 401, 404, 429, 503 |
+
+**Reply 200**: Success
+
+Text, as `text/markdown`.
+
 ### GET /api/ready
 
 Can the server do real work
@@ -2807,6 +2898,46 @@ Can the server do real work
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `ok` | boolean | yes |  |  |
+
+### GET /mcp
+
+Refused: this server has no stream
+
+|  |  |
+|---|---|
+| Who may call | anyone |
+| Errors | 404, 429, 503 |
+
+**Reply 405**: Success
+
+### POST /mcp
+
+Model Context Protocol, at the key's role
+
+|  |  |
+|---|---|
+| Who may call | API key only, anyone signed in |
+| MCP tool | None, HTTP only: The MCP endpoint itself. |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Request body**
+
+An empty object.
+
+**Reply 200**: Success
+
+An empty object.
+
+### DELETE /mcp
+
+Refused: this server keeps no sessions
+
+|  |  |
+|---|---|
+| Who may call | anyone |
+| Errors | 404, 429, 503 |
+
+**Reply 405**: Success
 
 ## Actions
 
@@ -2834,6 +2965,7 @@ Each action and its options with their defaults. Words for them are in language.
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`actions_list`](mcp.md#actions_list) |
 | Errors | 401, 404, 429, 503 |
 
 **Reply 200**: Success
@@ -2854,6 +2986,7 @@ One run per file, in one request: what a dropped folder needs. A file that canno
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`actions_start_many`](mcp.md#actions_start_many) |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Parameters**
@@ -2876,6 +3009,7 @@ One run per file, in one request: what a dropped folder needs. A file that canno
 |---|---|---|---|---|
 | `runs` | array of object | yes |  |  |
 | `runs[].action` | string | yes |  |  |
+| `runs[].chain_id` | string | yes |  | The chain this run is a step of, or empty. |
 | `runs[].created_at` | string (date-time) | yes |  |  |
 | `runs[].file_id` | string | yes |  |  |
 | `runs[].file_name` | string | yes |  |  |
@@ -2890,6 +3024,7 @@ One run per file, in one request: what a dropped folder needs. A file that canno
 | `runs[].started_at` | string (date-time) or null | yes |  |  |
 | `runs[].state` | string | yes | one of `queued`, `running`, `done`, `failed`, `cancelled` |  |
 | `runs[].step` | string | yes |  | What it is doing now: the file it is writing. |
+| `runs[].step_index` | integer | yes |  | Which step of its chain, from 0. |
 | `skipped` | array of object | yes |  |  |
 | `skipped[].error` | string | yes |  | Why it was not started: no such file, not_readable, no_bookmarks. |
 | `skipped[].file_id` | string | yes |  |  |
@@ -2903,6 +3038,7 @@ Queues a run and answers it. A file that is not a readable PDF, or one with no b
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`actions_start`](mcp.md#actions_start) |
 | Errors | 400, 401, 403, 404, 409, 429, 503 |
 
 **Parameters**
@@ -2924,6 +3060,7 @@ Queues a run and answers it. A file that is not a readable PDF, or one with no b
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `action` | string | yes |  |  |
+| `chain_id` | string | yes |  | The chain this run is a step of, or empty. |
 | `created_at` | string (date-time) | yes |  |  |
 | `file_id` | string | yes |  |  |
 | `file_name` | string | yes |  |  |
@@ -2938,6 +3075,7 @@ Queues a run and answers it. A file that is not a readable PDF, or one with no b
 | `started_at` | string (date-time) or null | yes |  |  |
 | `state` | string | yes | one of `queued`, `running`, `done`, `failed`, `cancelled` |  |
 | `step` | string | yes |  | What it is doing now: the file it is writing. |
+| `step_index` | integer | yes |  | Which step of its chain, from 0. |
 
 ### GET /api/runs
 
@@ -2948,6 +3086,7 @@ Newest first unless sorted: each run, how far it has got, and how many files it 
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`runs_list`](mcp.md#runs_list) |
 | Errors | 400, 401, 404, 429, 503 |
 
 **Parameters**
@@ -2967,6 +3106,7 @@ Newest first unless sorted: each run, how far it has got, and how many files it 
 | `next` | integer or null | yes |  | Offset of the next page, or null on the last one. |
 | `runs` | array of object | yes |  |  |
 | `runs[].action` | string | yes |  |  |
+| `runs[].chain_id` | string | yes |  | The chain this run is a step of, or empty. |
 | `runs[].created_at` | string (date-time) | yes |  |  |
 | `runs[].file_id` | string | yes |  |  |
 | `runs[].file_name` | string | yes |  |  |
@@ -2981,6 +3121,7 @@ Newest first unless sorted: each run, how far it has got, and how many files it 
 | `runs[].started_at` | string (date-time) or null | yes |  |  |
 | `runs[].state` | string | yes | one of `queued`, `running`, `done`, `failed`, `cancelled` |  |
 | `runs[].step` | string | yes |  | What it is doing now: the file it is writing. |
+| `runs[].step_index` | integer | yes |  | Which step of its chain, from 0. |
 | `total` | integer | yes |  |  |
 
 ### GET /api/runs/download
@@ -2992,6 +3133,7 @@ What a tool screen offers once a batch is done. A run that is not yours, or made
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | None, HTTP only: File bytes: MCP messages are JSON, and clients cap their size. runs_download_url gives each run's. |
 | Errors | 400, 401, 404, 429, 503 |
 
 **Parameters**
@@ -3013,6 +3155,7 @@ Server-sent events: "runs" when a run moves, "files" when an import has been rea
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | None, HTTP only: A stream for browsers, which needs a session. An agent polls runs_get or chains_get instead. |
 | Errors | 401, 403, 404, 429, 503 |
 
 **Reply 200**: Success
@@ -3028,6 +3171,7 @@ The run and the files it made, in order.
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`runs_get`](mcp.md#runs_get) |
 | Errors | 400, 401, 404, 429, 503 |
 
 **Parameters**
@@ -3041,6 +3185,7 @@ The run and the files it made, in order.
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `action` | string | yes |  |  |
+| `chain_id` | string | yes |  | The chain this run is a step of, or empty. |
 | `created_at` | string (date-time) | yes |  |  |
 | `file_id` | string | yes |  |  |
 | `file_name` | string | yes |  |  |
@@ -3056,16 +3201,18 @@ The run and the files it made, in order.
 | `started_at` | string (date-time) or null | yes |  |  |
 | `state` | string | yes | one of `queued`, `running`, `done`, `failed`, `cancelled` |  |
 | `step` | string | yes |  | What it is doing now: the file it is writing. |
+| `step_index` | integer | yes |  | Which step of its chain, from 0. |
 
 ### POST /api/runs/{run_id}/cancel
 
 Cancel a run
 
-A queued run is cancelled at once, a running one at its next step; what it made so far goes to the bin.
+A queued run is cancelled at once, a running one at its next step; what it made so far goes to the bin. A step of a chain stops the whole chain.
 
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`runs_cancel`](mcp.md#runs_cancel) |
 | Errors | 400, 401, 403, 404, 409, 429, 503 |
 
 **Parameters**
@@ -3095,6 +3242,7 @@ The run and every file it made go to the bin, and can be restored for ten minute
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`runs_delete`](mcp.md#runs_delete) |
 | Errors | 400, 401, 403, 404, 429, 503 |
 
 **Parameters**
@@ -3122,6 +3270,7 @@ Download everything a run made
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`runs_download_url`](mcp.md#runs_download_url) |
 | Errors | 400, 401, 404, 429, 503 |
 
 **Parameters**
@@ -3138,11 +3287,12 @@ Text, as `application/zip`.
 
 Start a cancelled or failed run again
 
-Queues the run again from the beginning, on the same file with the same options. A run that is queued, running or done, or one whose PDF is gone, is a 409.
+Queues the run again from the beginning, on the same file with the same options. A run that is queued, running or done, one whose PDF is gone, or a step of a chain (restart the chain instead), is a 409.
 
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`runs_restart`](mcp.md#runs_restart) |
 | Errors | 400, 401, 403, 404, 409, 429, 503 |
 
 **Parameters**
@@ -3162,6 +3312,7 @@ Queues the run again from the beginning, on the same file with the same options.
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `action` | string | yes |  |  |
+| `chain_id` | string | yes |  | The chain this run is a step of, or empty. |
 | `created_at` | string (date-time) | yes |  |  |
 | `file_id` | string | yes |  |  |
 | `file_name` | string | yes |  |  |
@@ -3176,6 +3327,7 @@ Queues the run again from the beginning, on the same file with the same options.
 | `started_at` | string (date-time) or null | yes |  |  |
 | `state` | string | yes | one of `queued`, `running`, `done`, `failed`, `cancelled` |  |
 | `step` | string | yes |  | What it is doing now: the file it is writing. |
+| `step_index` | integer | yes |  | Which step of its chain, from 0. |
 
 ### POST /api/runs/{run_id}/restore
 
@@ -3186,6 +3338,7 @@ Brings back a run you deleted, with its files, while they are still in the bin.
 |  |  |
 |---|---|
 | Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`runs_restore`](mcp.md#runs_restore) |
 | Errors | 400, 401, 403, 404, 409, 429, 503 |
 
 **Parameters**
@@ -3205,6 +3358,7 @@ Brings back a run you deleted, with its files, while they are still in the bin.
 | Field | Type | Required | Limits | Description |
 |---|---|---|---|---|
 | `action` | string | yes |  |  |
+| `chain_id` | string | yes |  | The chain this run is a step of, or empty. |
 | `created_at` | string (date-time) | yes |  |  |
 | `file_id` | string | yes |  |  |
 | `file_name` | string | yes |  |  |
@@ -3219,6 +3373,290 @@ Brings back a run you deleted, with its files, while they are still in the bin.
 | `started_at` | string (date-time) or null | yes |  |  |
 | `state` | string | yes | one of `queued`, `running`, `done`, `failed`, `cancelled` |  |
 | `step` | string | yes |  | What it is doing now: the file it is writing. |
+| `step_index` | integer | yes |  | Which step of its chain, from 0. |
+
+## Chains
+
+| Method | Path | Summary | Who may call |
+|---|---|---|---|
+| GET | [`/api/chains`](#get-apichains) | List your chains | browser session or API key, anyone signed in |
+| POST | [`/api/chains`](#post-apichains) | Start a chain of actions on PDFs | browser session or API key, anyone signed in |
+| GET | [`/api/chains/download`](#get-apichainsdownload) | Download what several chains made | browser session or API key, anyone signed in |
+| GET | [`/api/chains/{chain_id}`](#get-apichainschain_id) | One of your chains | browser session or API key, anyone signed in |
+| POST | [`/api/chains/{chain_id}/cancel`](#post-apichainschain_idcancel) | Stop a chain | browser session or API key, anyone signed in |
+| POST | [`/api/chains/{chain_id}/delete`](#post-apichainschain_iddelete) | Delete a chain | browser session or API key, anyone signed in |
+| GET | [`/api/chains/{chain_id}/download`](#get-apichainschain_iddownload) | Download what a chain made | browser session or API key, anyone signed in |
+| POST | [`/api/chains/{chain_id}/restart`](#post-apichainschain_idrestart) | Start a stopped chain again | browser session or API key, anyone signed in |
+
+### GET /api/chains
+
+List your chains
+
+Newest first: each chain, how far it has got, and how many files its last step made.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`chains_list`](mcp.md#chains_list) |
+| Errors | 401, 404, 429, 503 |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `chains` | array of object | yes |  |  |
+| `chains[].created_at` | string (date-time) | yes |  |  |
+| `chains[].file_id` | string | yes |  |  |
+| `chains[].file_name` | string | yes |  |  |
+| `chains[].finished_at` | string (date-time) or null | yes |  |  |
+| `chains[].id` | string | yes |  |  |
+| `chains[].message` | string | yes |  | Why it stopped, as a code: the failed step's. |
+| `chains[].output_bytes` | integer | yes |  |  |
+| `chains[].outputs` | integer | yes |  | How many files its last step made that are still here. |
+| `chains[].progress` | number | yes |  | 0 to 1, each step an equal share. |
+| `chains[].runs` | integer | yes |  | How many runs its steps have made so far. |
+| `chains[].state` | string | yes | one of `running`, `done`, `failed`, `cancelled` |  |
+| `chains[].steps` | array of object | yes |  |  |
+
+### POST /api/chains
+
+Start a chain of actions on PDFs
+
+One chain per file: its first step runs on the file, and each later step on every file the step before made, so split then compress compresses each section. Every step's options are checked before anything starts. A file that cannot take the first step is listed in skipped with why.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`chains_start`](mcp.md#chains_start) |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+| `file_ids` | array of string | yes |  | Your imported PDFs, up to 1000: one chain each. |
+| `steps` | array of object | yes |  | The actions, in order. Each later one runs on every file the one before made. |
+| `steps[].action` | string | yes |  | An action's name, from GET /api/actions. |
+| `steps[].options` | object | no |  | Its options; any left out take their default. |
+
+**Reply 201**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `chains` | array of object | yes |  |  |
+| `chains[].created_at` | string (date-time) | yes |  |  |
+| `chains[].file_id` | string | yes |  |  |
+| `chains[].file_name` | string | yes |  |  |
+| `chains[].finished_at` | string (date-time) or null | yes |  |  |
+| `chains[].id` | string | yes |  |  |
+| `chains[].message` | string | yes |  | Why it stopped, as a code: the failed step's. |
+| `chains[].output_bytes` | integer | yes |  |  |
+| `chains[].outputs` | integer | yes |  | How many files its last step made that are still here. |
+| `chains[].progress` | number | yes |  | 0 to 1, each step an equal share. |
+| `chains[].runs` | integer | yes |  | How many runs its steps have made so far. |
+| `chains[].state` | string | yes | one of `running`, `done`, `failed`, `cancelled` |  |
+| `chains[].steps` | array of object | yes |  |  |
+| `skipped` | array of object | yes |  |  |
+| `skipped[].error` | string | yes |  | Why it was not started: no such file, not_readable, no_bookmarks. |
+| `skipped[].file_id` | string | yes |  |  |
+
+### GET /api/chains/download
+
+Download what several chains made
+
+What the chain screen offers once a batch is done. A chain that is not yours, or made nothing, is left out; none left is a 404.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| MCP tool | None, HTTP only: File bytes: MCP messages are JSON, and clients cap their size. chains_download_url gives each chain's. |
+| Errors | 400, 401, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `ids` | query | string | no |  | Your chains' ids, comma-separated, up to 1000. |
+
+**Reply 200**: One zip, a folder per chain named after its PDF, always as an attachment
+
+Text, as `application/zip`.
+
+### GET /api/chains/{chain_id}
+
+One of your chains
+
+The chain, every run of its steps, and the files its last step made.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`chains_get`](mcp.md#chains_get) |
+| Errors | 400, 401, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `chain_id` | path | string | yes |  | The chain's id, from GET /api/chains. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `created_at` | string (date-time) | yes |  |  |
+| `file_id` | string | yes |  |  |
+| `file_name` | string | yes |  |  |
+| `files` | array of [`File`](#file) | yes |  | What the last step made: what the chain made. |
+| `finished_at` | string (date-time) or null | yes |  |  |
+| `id` | string | yes |  |  |
+| `message` | string | yes |  | Why it stopped, as a code: the failed step's. |
+| `output_bytes` | integer | yes |  |  |
+| `outputs` | integer | yes |  | How many files its last step made that are still here. |
+| `progress` | number | yes |  | 0 to 1, each step an equal share. |
+| `runs` | integer | yes |  | How many runs its steps have made so far. |
+| `state` | string | yes | one of `running`, `done`, `failed`, `cancelled` |  |
+| `step_runs` | array of object | yes |  | Every run of every step, by step. |
+| `step_runs[].action` | string | yes |  |  |
+| `step_runs[].chain_id` | string | yes |  | The chain this run is a step of, or empty. |
+| `step_runs[].created_at` | string (date-time) | yes |  |  |
+| `step_runs[].file_id` | string | yes |  |  |
+| `step_runs[].file_name` | string | yes |  |  |
+| `step_runs[].finished_at` | string (date-time) or null | yes |  |  |
+| `step_runs[].id` | string | yes |  |  |
+| `step_runs[].message` | string | yes |  | Why it failed, as a code. |
+| `step_runs[].options` | object | yes |  |  |
+| `step_runs[].output_bytes` | integer | yes |  |  |
+| `step_runs[].outputs` | integer | yes |  | How many of the files it made are still here. |
+| `step_runs[].progress` | number | yes |  | 0 to 1. |
+| `step_runs[].result` | object | yes |  | What it reported when done, such as how many sections. |
+| `step_runs[].started_at` | string (date-time) or null | yes |  |  |
+| `step_runs[].state` | string | yes | one of `queued`, `running`, `done`, `failed`, `cancelled` |  |
+| `step_runs[].step` | string | yes |  | What it is doing now: the file it is writing. |
+| `step_runs[].step_index` | integer | yes |  | Which step of its chain, from 0. |
+| `steps` | array of object | yes |  |  |
+
+### POST /api/chains/{chain_id}/cancel
+
+Stop a chain
+
+Every step still to finish is cancelled, a running one at its next step.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`chains_cancel`](mcp.md#chains_cancel) |
+| Errors | 400, 401, 403, 404, 409, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `chain_id` | path | string | yes |  | The chain's id, from GET /api/chains. |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `ok` | boolean | yes |  |  |
+
+### POST /api/chains/{chain_id}/delete
+
+Delete a chain
+
+The chain, its runs and every file they made go to the bin. A chain still going is stopped first.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`chains_delete`](mcp.md#chains_delete) |
+| Errors | 400, 401, 403, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `chain_id` | path | string | yes |  | The chain's id, from GET /api/chains. |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `ok` | boolean | yes |  |  |
+
+### GET /api/chains/{chain_id}/download
+
+Download what a chain made
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`chains_download_url`](mcp.md#chains_download_url) |
+| Errors | 400, 401, 404, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `chain_id` | path | string | yes |  | The chain's id, from GET /api/chains. |
+
+**Reply 200**: A zip of the last step's files, stored as they are, always as an attachment
+
+Text, as `application/zip`.
+
+### POST /api/chains/{chain_id}/restart
+
+Start a stopped chain again
+
+Every run of a failed or cancelled chain that failed or was cancelled is queued again; what its steps finished stays.
+
+|  |  |
+|---|---|
+| Who may call | browser session or API key, anyone signed in |
+| MCP tool | [`chains_restart`](mcp.md#chains_restart) |
+| Errors | 400, 401, 403, 404, 409, 429, 503 |
+
+**Parameters**
+
+| Name | In | Type | Required | Limits | Description |
+|---|---|---|---|---|---|
+| `chain_id` | path | string | yes |  | The chain's id, from GET /api/chains. |
+
+**Request body**
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `csrf_token` | string | no |  | From GET /api/me. Browser sessions only. |
+
+**Reply 200**: Success
+
+| Field | Type | Required | Limits | Description |
+|---|---|---|---|---|
+| `created_at` | string (date-time) | yes |  |  |
+| `file_id` | string | yes |  |  |
+| `file_name` | string | yes |  |  |
+| `finished_at` | string (date-time) or null | yes |  |  |
+| `id` | string | yes |  |  |
+| `message` | string | yes |  | Why it stopped, as a code: the failed step's. |
+| `output_bytes` | integer | yes |  |  |
+| `outputs` | integer | yes |  | How many files its last step made that are still here. |
+| `progress` | number | yes |  | 0 to 1, each step an equal share. |
+| `runs` | integer | yes |  | How many runs its steps have made so far. |
+| `state` | string | yes | one of `running`, `done`, `failed`, `cancelled` |  |
+| `steps` | array of object | yes |  |  |
 
 ## Retention
 
@@ -3499,6 +3937,9 @@ The shapes the routes above refer to by name.
 | `logs_ui_clicks` | boolean | yes |  |  |
 | `maintenance` | string | yes | one of `none`, `read_only`, `full` |  |
 | `may_mint_keys` | boolean | no |  | API keys only: whether this key may make keys for other accounts. |
+| `mcp_doc_url` | string | yes |  | Where to read the MCP tools as a page for people: config/mcp.md in app.repo, or /docs/mcp when there is no repo. |
+| `mcp_enabled` | boolean | yes |  | server.mcp: whether POST /mcp answers. |
+| `mcp_url` | string | yes |  | Where to read the MCP reference: config/mcp.json in app.repo, or /api/mcp.json when there is no repo. Only with server.mcp on. |
 | `openapi_url` | string | yes |  | Where to read this API's reference: config/api.json in app.repo, or /api/api.json when there is no repo. |
 | `owner` | boolean | yes |  | Whether this is the owner's account: the same as is_owner, under portal contract v3's name. |
 | `repo` | string | yes |  | app.repo without a trailing / or .git: where the source lives. Empty when it is not set. |

@@ -18,3 +18,8 @@ class LocalSplitTest(unittest.TestCase):
         answer = subprocess.run([sys.executable, str(ROOT / "scripts" / "check_local_split.py")],
                                 capture_output=True, text=True, cwd=ROOT)
         self.assertEqual(answer.returncode, 0, answer.stdout + answer.stderr)
+
+    def test_the_browser_rotates_and_compresses_like_the_server(self) -> None:
+        answer = subprocess.run([sys.executable, str(ROOT / "scripts" / "check_local_tools.py")],
+                                capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(answer.returncode, 0, answer.stdout + answer.stderr)

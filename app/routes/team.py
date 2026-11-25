@@ -33,6 +33,9 @@ class ListTeamReply(Paged):
     "GET /api/team", summary="List team",
     tag="Account",
     description="People with an active account, a page at a time: id and display name.",
+    mcp_note="Use the id wherever another tool asks for a user. next is the offset of the following page, "
+    "or null on the last one.",
+    mcp="list_team", read_only=True,
 )
 def list_team(request: Request, body: Page) -> ListTeamReply:
     """Over HTTP and as the MCP list_team tool."""

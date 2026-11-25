@@ -189,12 +189,14 @@ const App = {
     const loading = [];
     loading.push( Keys.init( me ) );
     loading.push( Portal.init( me ) );
+    Mcp.init( me );
     loading.push( Sessions.init() );
     loading.push( Library.init( me ) );
     // Tools first: the tool screens read where they run from it.
     Tools.init( me );
     ToolModes.init( me );
     Local.init( me );
+    Chain.init( me );
     loading.push( Runs.init( me ) );
     loading.push( Retention.init( me ) );
     About.init( me );

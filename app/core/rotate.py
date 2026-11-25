@@ -46,7 +46,7 @@ class RotateError(Exception):
 
 class ServerRunningError(RotateError):
     def __init__(self) -> None:
-        super().__init__("the server is running -- stop it first, it holds the old key in memory and would go on writing with it")
+        super().__init__("the server or a worker is running -- stop them first, they hold the old key in memory and would go on writing with it")
 
 
 @dataclass
@@ -136,5 +136,5 @@ def stage(cfg: config.Config, new_key: str) -> int:
 
 
 def _ensure_stopped(cfg: config.Config) -> None:
-    if server_lock.held(cfg.app_dir / config.SERVER_LOCK_NAME):
+    if server_lock.anything_running(cfg.app_dir, config.SERVER_LOCK_NAME):
         raise ServerRunningError()

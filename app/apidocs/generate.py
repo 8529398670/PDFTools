@@ -5,6 +5,7 @@ there. Nothing is built that a route needs to run: the docs only read the
 table."""
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from starlette.routing import Route
@@ -52,5 +53,11 @@ def documents() -> dict[str, str]:
     files: dict[str, str] = {}
     files["api.json"] = apidocs.encode(document)
     manifest_document = None
+    from app.mcp import manifest
+    from app.routes.mcp_tools import build_registry
+
+    files["mcp.json"] = manifest.build(build_registry(), document)
+    manifest_document = json.loads(files["mcp.json"])
+    files["mcp.md"] = render_mcp(document, manifest_document)
     files["api.md"] = render(document, manifest_document)
     return files

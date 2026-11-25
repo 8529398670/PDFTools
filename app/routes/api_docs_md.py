@@ -49,3 +49,17 @@ def api_doc_url(cfg: Config) -> str:
     return repo_file(cfg, "config/api.md") or "/docs/api"
 
 
+@route(
+    "GET /api/mcp.md", summary="The MCP tools as Markdown tables for people",
+    tag="Monitoring", feature="mcp", errors=(404,), reply_type="text/markdown",
+    mcp_http="The MCP reference itself, for people; tools/list gives the same list.",
+)
+async def get_mcp_doc(request: Request) -> Response:
+    return _markdown(assets.MCP_DOC)
+
+
+def mcp_doc_url(cfg: Config) -> str:
+    """The same as api_doc_url, for config/mcp.md."""
+    return repo_file(cfg, "config/mcp.md") or "/docs/mcp"
+
+

@@ -31,6 +31,8 @@ class SetMyShortcutsReply(Reply):
     description='Replace your changed keyboard shortcuts: action name to binding, such as "search": "Mod+K" '
     '(Mod is Cmd on a Mac, Ctrl elsewhere). Send the whole set; an empty binding switches a key off, and {} '
     'puts every key back to its default.',
+    mcp_note="whoami shows the current set.",
+    mcp="set_shortcuts",
 )
 def set_my_shortcuts(request: Request, body: SetMyShortcuts) -> SetMyShortcutsReply:
     """Replaces the caller's changed shortcuts, over HTTP or the MCP

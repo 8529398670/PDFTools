@@ -5,6 +5,6 @@ commit: 13377794684472d1495e0062b5ffd90f807616bd
 project_name: "PDFTools"
 slug: pdftools
 port: 27079
-features: [files, two_factor, api_keys]
+features: [files, two_factor, api_keys, mcp]
 tests: false
-pruned: [backups, invite_links, mcp, metrics, passwords, webhooks]
+pruned: [backups, invite_links, metrics, passwords, webhooks]

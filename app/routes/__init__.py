@@ -38,6 +38,7 @@ from app.apidocs import ADMIN, KEY_ONLY, OWNER, PUBLIC, SESSION_ONLY
 from app.apidocs.route import Declared, declared_of
 from app.core.security import RequireAdmin, RequireLogin, RequireSession
 from app.core.security import Guard
+from app.core.security import RequireAPIKey
 from app.core.security import RequireOwner
 from app.core.live_reload import Watcher
 from app.core.static_files import StaticServer
@@ -47,9 +48,11 @@ from app.routes import (
     api_docs_md,
     api_keys,
     auth,
+    chains,
     files,
     jobs,
     logs,
+    mcp_manifest,
     meta,
     openapi,
     portal,
@@ -67,6 +70,21 @@ from app.routes.api_keys import RequireAPIKeys
 from app.routes.files import RequireFiles
 from app.routes.helpers import get_config
 from app.routes.helpers import not_found
+
+
+class RequireMCP(Guard):
+    """Makes /mcp answer 404 while server.mcp or auth.api_keys is off --
+    exactly what an unregistered route would say. Checked per request rather
+    than by registering /mcp or not, because both can be switched while the
+    server runs."""
+
+    statuses = (404,)
+
+    def refuse(self, request: Request) -> Response | None:
+        cfg = get_config(request)
+        if not cfg.mcp_enabled or not cfg.api_keys_enabled:
+            return not_found("not found")
+        return None
 
 
 class RequireTwoFactor(Guard):
@@ -97,9 +115,11 @@ MODULES = [
     api_docs_md,
     api_keys,
     auth,
+    chains,
     files,
     jobs,
     logs,
+    mcp_manifest,
     meta,
     openapi,
     portal,
@@ -122,6 +142,7 @@ FEATURE_GUARDS: dict[str, type[Guard]] = {
     "two_factor": RequireTwoFactor,
     "files": RequireFiles,
     "api_keys": RequireAPIKeys,
+    "mcp": RequireMCP,
     "logs": RequireLogs,
 }
 
@@ -134,6 +155,7 @@ def guards_of(declared: Declared) -> tuple[type, ...]:
     if op.feature in FEATURE_GUARDS and not declared.no_switch:
         guards.append(FEATURE_GUARDS[op.feature])
     if op.access == KEY_ONLY:
+        guards.append(RequireAPIKey)
         if op.role == ADMIN:
             guards.append(RequireAdmin)
     elif op.access != PUBLIC:

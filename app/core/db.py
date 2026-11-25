@@ -60,6 +60,9 @@ BUCKET_RUNS = "runs"
 # The stored bytes, one record per distinct content, shared by every file
 # record (any account's) with that content. See app/models/files.py.
 BUCKET_BLOBS = "blobs"
+# Several actions run one after another on one file, each a run of its own.
+# See app/models/chains.py.
+BUCKET_CHAINS = "chains"
 
 BUCKETS = (
     BUCKET_USERS,
@@ -77,6 +80,7 @@ BUCKETS = (
     BUCKET_RETENTION,
     BUCKET_RUNS,
     BUCKET_BLOBS,
+    BUCKET_CHAINS,
 )
 
 # How long a writer waits for another writer before giving up. Without it a

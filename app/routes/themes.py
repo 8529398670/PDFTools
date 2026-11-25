@@ -86,6 +86,8 @@ class SetMyThemesReply(Reply):
     description="Replace your whole list of color themes (1 to 40) and pick the one you use. themes: null "
     "goes back to following the app's defaults. A theme is the Theme schema in the API reference "
     "(config/api.json): id, name, mode light|dark, accent, second, and optional colors as #rrggbb.",
+    mcp_note="whoami shows the current list.",
+    mcp="set_themes",
 )
 def set_my_themes(request: Request, body: SetMyThemes) -> SetMyThemesReply:
     """Replaces the caller's own list and pick, over HTTP or the MCP
@@ -119,6 +121,7 @@ class SetMyThemeReply(Reply):
     "POST /api/account/theme", summary="Pick your theme",
     tag="Account", feature="appearance",
     description="Switch to another theme from your list (or the defaults), by its id.",
+    mcp="set_theme",
 )
 def set_my_theme(request: Request, body: SetMyTheme) -> SetMyThemeReply:
     """Changes only which theme the caller uses, over HTTP or the MCP
@@ -142,6 +145,7 @@ class ThemeDefaultsReply(Reply):
     tag="Admin", role=ADMIN, feature="appearance", errors=(404,),
     description="The theme list everyone without their own list sees. themes is null while the built-in "
     "ones apply.",
+    mcp="admin_get_theme_defaults", read_only=True,
 )
 def get_theme_defaults(request: Request) -> ThemeDefaultsReply:
     """themes is null while the built-in ones apply. Over HTTP and as the MCP
@@ -166,6 +170,7 @@ class SetThemeDefaultsReply(Reply):
     tag="Admin", role=ADMIN, feature="appearance", errors=(404,),
     description="Replace the theme list everyone without their own list sees, 1 to 40 themes in the Theme "
     "schema of the API reference. null puts the built-in themes back.",
+    mcp="admin_set_theme_defaults",
 )
 def set_theme_defaults(request: Request, body: SetThemeDefaults) -> SetThemeDefaultsReply:
     """Replaces the list everyone without their own list sees, over HTTP or

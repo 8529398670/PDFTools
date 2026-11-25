@@ -156,6 +156,7 @@ Starting pdftools with $( "$PYTHON" --version 2>&1 ) from .venv
   static    ${STATIC_NOTE}
   language  ${LANGUAGE_NOTE}
   code      Python changes need scripts/run.sh again; static/ edits only a reload
+  worker    $( [ "$separate_worker" = "true" ] && echo "python -m app worker, beside the server (files.separate_worker)" || echo "none: the server runs actions itself (files.separate_worker: false)" )
 
 A login link for the owner any time: scripts/login.sh (from another terminal).
 
@@ -178,6 +179,22 @@ mkdir -p "$RUN_DIR"
   echo ""
   echo "Not answering on port ${port} after 20 seconds -- see the log above."
 ) &
+
+# The worker that runs actions (files.separate_worker), beside the server in
+# this terminal: Ctrl-C reaches both, and if the server goes any other way the
+# watcher below stops the worker too. TERM puts its runs back in the queue.
+if [ "$separate_worker" = "true" ]; then
+  SERVER_PID=$$
+  "$PYTHON" -m app worker &
+  echo $! > "$WORKER_PID_FILE"
+  (
+    worker="$( cat "$WORKER_PID_FILE" )"
+    while kill -0 "$SERVER_PID" 2>/dev/null && kill -0 "$worker" 2>/dev/null; do
+      sleep 1
+    done
+    kill -TERM "$worker" 2>/dev/null || true
+  ) &
+fi
 
 # exec keeps this shell's pid, so the one written here is the server's.
 echo $$ > "$PID_FILE"

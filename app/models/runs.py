@@ -1,19 +1,28 @@
 """One action run on one file: which action, with which options, how far it
 has got, and the files it made (files with kind "output" and this run's id).
 
-A run is queued when someone starts it, and the runner (app/core/runner.py)
-takes it from there. The record is the truth a restart starts from: a run left
-queued or running is started again from the beginning, after what it had made
-so far is removed, so an action never has to be resumable part way.
+A run is queued when someone starts it, and the queue is this bucket: a
+worker (app/core/run_worker.py, in the web server or in its own process,
+`python -m app worker`) claims the oldest queued run with a lease, renews the
+lease while it works, and a run whose lease ran out (its worker died) is
+claimed again. The record is the truth a restart starts from: a run is started
+again from the beginning, after what it had made so far is removed, so an
+action never has to be resumable part way.
+
+A cancel is asked for on the record too (cancel_requested), since the worker
+holding the run may be another process; the action sees it at its next step.
+Anything that moves a run or makes a file bumps the work counter in
+BUCKET_META, which the web server watches to tell open pages (runner.py).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import time
 from datetime import datetime, timedelta
 from typing import Any
 
 from app.core import encryption
-from app.core.db import BUCKET_FILES, BUCKET_RUNS, Record, Store
+from app.core.db import BUCKET_FILES, BUCKET_META, BUCKET_RUNS, Record, Store, Transaction
 from app.models import RestoreGoneError, deleted_long_ago, from_iso, mark_deleted, to_iso, unmark_deleted, utc_now
 from app.models import files, users
 
@@ -48,6 +57,13 @@ class Run:
     # reported when it finished: counts the page words with language.yaml.
     step: str = ""
     result: dict[str, Any] = field(default_factory=dict)
+    # The worker holding it while it runs, and until when (epoch seconds).
+    owner: str = ""
+    lease_until: float = 0.0
+    cancel_requested: bool = False
+    # A step of a chain (app/models/chains.py): which, and which step from 0.
+    chain_id: str = ""
+    step_index: int = 0
 
     @property
     def deleted(self) -> bool:
@@ -72,6 +88,11 @@ class Run:
             "deleted_by": self.deleted_by,
             "step": self.step,
             "result": self.result,
+            "owner": self.owner,
+            "lease_until": self.lease_until,
+            "cancel_requested": self.cancel_requested,
+            "chain_id": self.chain_id,
+            "step_index": self.step_index,
         }
 
     @classmethod
@@ -94,11 +115,16 @@ class Run:
             deleted_by=record.get("deleted_by"),
             step=record.get("step", ""),
             result=record.get("result") or {},
+            owner=record.get("owner", ""),
+            lease_until=float(record.get("lease_until") or 0.0),
+            cancel_requested=bool(record.get("cancel_requested")),
+            chain_id=record.get("chain_id", ""),
+            step_index=int(record.get("step_index") or 0),
         )
 
 
-def create_run(store: Store, user_id: int, action: str, file: files.File, options: dict[str, Any]) -> Run:
-    run = Run(
+def new_run(user_id: int, action: str, file: files.File, options: dict[str, Any], chain_id: str = "", step_index: int = 0) -> Run:
+    return Run(
         id=encryption.url_token(12),
         user_id=user_id,
         action=action,
@@ -109,8 +135,15 @@ def create_run(store: Store, user_id: int, action: str, file: files.File, option
         progress=0.0,
         message="",
         created_at=utc_now(),
+        chain_id=chain_id,
+        step_index=step_index,
     )
+
+
+def create_run(store: Store, user_id: int, action: str, file: files.File, options: dict[str, Any], chain_id: str = "", step_index: int = 0) -> Run:
+    run = new_run(user_id, action, file, options, chain_id, step_index)
     store.put(BUCKET_RUNS, run.id, run.to_record())
+    bump_work(store)
     return run
 
 
@@ -143,7 +176,133 @@ def update(store: Store, run_id: str, **changes: Any) -> Run | None:
             record[name] = to_iso(value) if isinstance(value, datetime) else value
 
     record = store.update_value(BUCKET_RUNS, run_id, mutate)
+    bump_work(store)
     return None if record is None else Run.from_record(record)
+
+
+# ---------------------------------------------------------------------------
+# the queue
+# ---------------------------------------------------------------------------
+
+# How long a claim holds without its worker checking in. The worker renews it
+# every LEASE_SECONDS / 3.
+LEASE_SECONDS = 60.0
+WORK_KEY = "work"
+WORKER_PREFIX = "worker/"
+
+
+def claim_next(store: Store, owner: str, now: float | None = None, lease: float = LEASE_SECONDS) -> Run | None:
+    """The oldest queued run, or a running one whose worker's lease ran out,
+    now running under owner. One write transaction, so two workers (in two
+    processes) never take the same one. None when nothing is due."""
+    now = time.time() if now is None else now
+    with store.transaction() as transaction:
+        due = []
+        for _, record in transaction.all(BUCKET_RUNS):
+            if record.get("deleted_at") is not None:
+                continue
+            state = record.get("state")
+            if state == QUEUED or (state == RUNNING and float(record.get("lease_until") or 0) < now):
+                due.append(record)
+        if not due:
+            return None
+        due.sort(key=lambda record: record["created_at"])
+        record = due[0]
+        record.update(state=RUNNING, owner=owner, lease_until=now + lease)
+        transaction.put(BUCKET_RUNS, record["id"], record)
+        _bump(transaction)
+    return Run.from_record(record)
+
+
+def renew(store: Store, run_id: str, owner: str, lease: float = LEASE_SECONDS) -> bool:
+    """Push the lease out while the run is still this owner's. False when it
+    is not (another worker took it after this one went quiet too long)."""
+    held = False
+
+    def mutate(record: Record) -> None:
+        nonlocal held
+        if record.get("owner") == owner and record.get("state") == RUNNING:
+            held = True
+            record["lease_until"] = time.time() + lease
+
+    store.update_value(BUCKET_RUNS, run_id, mutate)
+    return held
+
+
+def release(store: Store, owner: str) -> int:
+    """Put every run owner still holds back in the queue: a worker stopping
+    hands its runs on rather than waiting for the leases to run out."""
+    count = 0
+    with store.transaction() as transaction:
+        for key, record in transaction.all(BUCKET_RUNS):
+            if record.get("owner") == owner and record.get("state") == RUNNING:
+                record.update(state=QUEUED, owner="", lease_until=0.0, progress=0.0, step="")
+                transaction.put(BUCKET_RUNS, key, record)
+                count += 1
+        if count:
+            _bump(transaction)
+    return count
+
+
+def request_cancel(store: Store, run_id: str) -> Run | None:
+    """A queued run is cancelled at once; a running one is asked to stop, and
+    its worker marks it cancelled at the action's next step."""
+
+    def mutate(record: Record) -> None:
+        if record.get("state") == QUEUED:
+            record.update(state=CANCELLED, finished_at=to_iso(utc_now()), cancel_requested=False)
+        elif record.get("state") == RUNNING:
+            record["cancel_requested"] = True
+
+    record = store.update_value(BUCKET_RUNS, run_id, mutate)
+    bump_work(store)
+    return None if record is None else Run.from_record(record)
+
+
+def cancel_requested(store: Store, run_id: str) -> bool:
+    record = store.get(BUCKET_RUNS, run_id)
+    return record is None or bool(record.get("cancel_requested")) or record.get("deleted_at") is not None
+
+
+def _bump(transaction: Transaction, what: str = "runs") -> None:
+    record = transaction.get(BUCKET_META, WORK_KEY) or {}
+    record[what] = int(record.get(what) or 0) + 1
+    transaction.put(BUCKET_META, WORK_KEY, record)
+
+
+def bump_work(store: Store, what: str = "runs") -> None:
+    """Tell the web server something moved: "runs" or "files"."""
+    with store.transaction() as transaction:
+        _bump(transaction, what)
+
+
+def work_version(store: Store) -> tuple[int, int]:
+    record = store.get(BUCKET_META, WORK_KEY) or {}
+    return int(record.get("runs") or 0), int(record.get("files") or 0)
+
+
+def beat(store: Store, worker: dict[str, Any]) -> None:
+    """A worker checking in: who it is and what it is doing."""
+    store.put(BUCKET_META, WORKER_PREFIX + worker["id"], dict(worker, beat=time.time()))
+
+
+def gone(store: Store, worker_id: str) -> None:
+    store.delete(BUCKET_META, WORKER_PREFIX + worker_id)
+
+
+def workers(store: Store, within: float = 60.0) -> list[dict[str, Any]]:
+    """Workers that checked in within the last within seconds. Older entries
+    (a worker that died without saying so) are dropped as they are found."""
+    now = time.time()
+    found = []
+    for key, record in store.all(BUCKET_META):
+        if not str(key).startswith(WORKER_PREFIX):
+            continue
+        if now - float(record.get("beat") or 0) <= within:
+            found.append(record)
+        elif now - float(record.get("beat") or 0) > 3600:
+            store.delete(BUCKET_META, key)
+    return found
 
 
 RESTARTABLE = (CANCELLED, FAILED)
@@ -160,9 +319,11 @@ def restart_run(store: Store, run_id: str) -> Run | None:
         if record.get("deleted_at") is not None or record.get("state") not in RESTARTABLE:
             return
         restarted = True
-        record.update(state=QUEUED, progress=0.0, message="", step="", result={}, started_at=None, finished_at=None, outputs=[])
+        record.update(state=QUEUED, progress=0.0, message="", step="", result={}, started_at=None, finished_at=None, outputs=[],
+                      owner="", lease_until=0.0, cancel_requested=False)
 
     record = store.update_value(BUCKET_RUNS, run_id, mutate)
+    bump_work(store)
     return Run.from_record(record) if record is not None and restarted else None
 
 
@@ -171,6 +332,7 @@ def add_output(store: Store, run_id: str, file_id: str) -> None:
         record.setdefault("outputs", []).append(file_id)
 
     store.update_value(BUCKET_RUNS, run_id, mutate)
+    bump_work(store, "files")
 
 
 def outputs_of(store: Store, run: Run) -> list[files.File]:

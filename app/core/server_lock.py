@@ -64,3 +64,28 @@ def held(path: Path) -> bool:
         return True
     lock.release()
     return False
+
+
+# Held, shared, by every worker on this app directory (`python -m app worker`,
+# app/worker/run.py): several may run at once, and a restore or a key
+# rotation, which must have nothing writing, sees any of them.
+WORKER_LOCK_NAME = "worker.lock"
+
+
+def acquire_shared(path: Path) -> ServerLock | None:
+    """A shared hold on path, which any number of processes may have at once,
+    and which an exclusive try (held) sees. None where there is no flock."""
+    if fcntl is None:
+        return None
+    descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_SH)
+    except OSError:
+        os.close(descriptor)
+        return None
+    return ServerLock(descriptor)
+
+
+def anything_running(app_dir: Path, server_lock_name: str) -> bool:
+    """Whether a server or any worker is running on app_dir."""
+    return held(app_dir / server_lock_name) or held(app_dir / WORKER_LOCK_NAME)

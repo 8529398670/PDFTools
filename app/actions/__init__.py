@@ -50,6 +50,8 @@ class Context:
 
     run_id: str
     source: Path
+    # The source's file name, for naming what is made from it.
+    source_name: str
     work: Path
     source_info: dict[str, Any]
     progress: Callable[[float, str], None]
@@ -71,19 +73,20 @@ class Action:
 
 
 def _registry() -> dict[str, Action]:
-    from app.actions import split_bookmarks
+    from app.actions import compress, rotate, split_bookmarks
 
-    actions = [split_bookmarks.ACTION]
+    actions = [split_bookmarks.ACTION, rotate.ACTION, compress.ACTION]
     return {action.name: action for action in actions}
 
 
 ACTIONS: dict[str, Action] = _registry()
 
 # Every tool the Tools page lists, built or still to come, in the same order
-# as static/js/tools.js (the catalog with their sections and icons). Only these
+# as static/js/tools.js (chain is the chain screen, several actions in a row) (the catalog with their sections and icons). Only these
 # ids can carry a run-mode override (app/models/tool_modes.py), so an id here
 # is never renamed once shipped, the same as an action's name.
 TOOL_IDS: tuple[str, ...] = (
+    "chain",
     "extract_pages", "delete_pages", "split_bookmarks", "split_pages", "split_size", "split_text",
     "alternate_mix", "visual_combine", "merge",
     "extract_text", "grayscale", "images_to_pdf",

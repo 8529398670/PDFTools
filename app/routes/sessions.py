@@ -82,6 +82,7 @@ def current_session_id(request: Request) -> str:
     description="Where your account is signed in, a page at a time: id, when it started and was last seen, "
     "the browser, and the name you gave it. Through an API key no device is current. next is the offset of "
     "the following page, or null on the last one.",
+    mcp="list_my_sessions", read_only=True,
 )
 def list_my_sessions(request: Request, body: Page) -> SessionsReply:
     """Where the caller is signed in, over HTTP and as the MCP
@@ -131,6 +132,7 @@ class ListUserSessions(UserIDPath):
     description="Where an account is signed in: every session, with when it started and was last seen. "
     "Addresses are shown to the owner and service accounts only. Nobody sees the owner's, and only the "
     "owner sees another admin's.",
+    mcp="admin_list_user_sessions", read_only=True,
 )
 def list_user_sessions(request: Request, body: ListUserSessions) -> SessionsReply:
     """Where an account is signed in, for ending one device rather than
@@ -159,6 +161,8 @@ class RevokeUserSession(UserIDPath):
     "POST /api/admin/users/{user_id}/sessions/{session_id}/revoke", summary="Sign out one of an account's devices",
     bulk=True,
     tag="Admin", role=ADMIN, feature="sessions", errors=(404,),
+    mcp_note="End one of an account's sessions, rather than all of them with admin_revoke_access.",
+    mcp="admin_revoke_user_session", destructive=True,
 )
 def revoke_user_session(request: Request, body: RevokeUserSession) -> OkReply:
     """Sign one of an account's devices out, and only that: over HTTP or the
@@ -190,6 +194,7 @@ class LabelOneReply(Reply):
     tag="Account", feature="sessions", errors=(404, 409),
     description="Give one of your devices a name (at most 80 characters; empty clears it). expect, when "
     "given, is the name you think it has now.",
+    mcp="label_my_session",
 )
 def label_one(request: Request, body: LabelOne) -> LabelOneReply:
     """Name one of your own devices, this one included, over HTTP or the MCP
@@ -213,6 +218,7 @@ def label_one(request: Request, body: LabelOne) -> LabelOneReply:
     bulk=True,
     tag="Account", feature="sessions", errors=(404,),
     description="End one of your signed-in sessions; that browser has to sign in again.",
+    mcp="revoke_my_session", destructive=True,
 )
 def revoke_one(request: Request, body: SessionIDPath) -> OkReply:
     """Sign out one other device, over HTTP or the MCP revoke_my_session
@@ -235,6 +241,10 @@ class RevokeOthersReply(Reply):
 @route(
     "POST /api/account/sessions/revoke-others", summary="Sign out every other device",
     tag="Account", feature="sessions",
+    mcp_title="Sign out all your devices",
+    mcp_description="End every session your account has: through an API key there is no current device to "
+    "keep, so every browser signs in again. API keys keep working. Answers with how many were removed.",
+    mcp="revoke_my_other_sessions", destructive=True,
 )
 def revoke_others(request: Request) -> RevokeOthersReply:
     """The button for a lost phone or a shared computer: everything but this

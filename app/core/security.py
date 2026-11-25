@@ -383,6 +383,26 @@ class RequireKeyMinting(Guard):
         return None
 
 
+class RequireAPIKey(Guard):
+    """RequireSession's mirror: refuses a browser session and lets only a key
+    through. It guards /mcp, which is for agents and scripts. Taking only a
+    header credential there means no ambient cookie can ride along on a
+    request some other page caused, so the endpoint needs no CSRF token and
+    the no-credentials rule for keys covers everything it can do."""
+
+    statuses = (401, 403)
+
+    def refuse(self, request: Request) -> Response | None:
+        actor = actor_from(request)
+        if actor is None:
+            response = _refuse(401, "not authenticated", CODE_NOT_AUTHENTICATED)
+            response.headers["WWW-Authenticate"] = "Bearer"
+            return response
+        if not actor.via_api_key:
+            return _refuse(403, "this endpoint requires an API key, not a signed-in session")
+        return None
+
+
 # What a viewer may still send besides reads: signing out, ending its own
 # sessions, and cancelling its own login link -- each only takes a way in
 # away. /mcp is let through because a viewer key reads through it, and MCP

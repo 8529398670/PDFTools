@@ -2,7 +2,9 @@
 download what it made one file at a time or all together as a zip, cancel it,
 delete it. Everyone has their own runs; someone else's answers 404.
 
-The work itself happens in app/core/runner.py; the actions are app/actions/.
+The work itself happens in a worker (app/core/run_worker.py) that claims
+queued runs; the actions are app/actions/. A run that is a step of a chain
+(app/routes/chains.py) is restarted through its chain.
 """
 from __future__ import annotations
 
@@ -29,6 +31,29 @@ from app.routes.admin import OkReply
 from app.routes.files import File, _row, content_disposition
 from app.routes.helpers import DateTime, Dir, Page, Paged, Refused, error, get_config, get_store, match_rows, restore_refusal, run, sorted_page
 from app.routes.logs import audit
+from app.routes.mcp_tools import file_url, files_on
+from app.mcp.registry import Call, Refusal
+
+# What a run's zip is called after its PDF: "<stem> - <this>.zip".
+ZIP_SUFFIX = {"split_bookmarks": "sections", "rotate": "rotated", "compress": "compressed"}
+
+
+def zip_name(action: str, file_name: str) -> str:
+    stem = PurePosixPath(file_name).stem or "files"
+    return f"{stem} - {ZIP_SUFFIX.get(action, 'files')}.zip"
+
+
+def run_download_url(call: Call, body: Any, serve: Any) -> dict[str, Any]:  # noqa: ARG001 -- serve is the zip route
+    """Where to GET a finished run's zip, whose bytes cannot come through MCP,
+    with each file's own address."""
+    detail = get_run.__declared__.serve(call.request, body)
+    if detail.state != "done":
+        raise Refusal("that run has not finished")
+    return {
+        "id": detail.id, "zip_url": file_url(call, f"/api/runs/{detail.id}/download"),
+        "files": [{"id": file.id, "name": file.name, "size": file.size, "url": file_url(call, f"/api/files/{file.id}/download")}
+                  for file in detail.files],
+    }
 
 NO_SUCH_RUN = "no such run"
 
@@ -48,6 +73,7 @@ class ActionsReply(Reply):
     tag="Actions", feature="files",
     description="Each action and its options with their defaults. Words for them are in language.yaml under "
     "actions.<name>.",
+    mcp="actions_list", read_only=True, enabled=files_on,
 )
 def list_actions(request: Request) -> ActionsReply:
     return ActionsReply(actions=[
@@ -72,6 +98,8 @@ class RunRow(Reply):
     created_at: DateTime
     started_at: DateTime | None
     finished_at: DateTime | None
+    chain_id: Annotated[str, Meta(description="The chain this run is a step of, or empty.")]
+    step_index: Annotated[int, Meta(description="Which step of its chain, from 0.")]
 
 
 class RunDetail(RunRow):
@@ -103,6 +131,8 @@ def _run_row(request: Request, one: models.Run, made: list[file_models.File] | N
         created_at=to_iso(one.created_at),
         started_at=to_iso(one.started_at),
         finished_at=to_iso(one.finished_at),
+        chain_id=one.chain_id,
+        step_index=one.step_index,
     )
 
 
@@ -117,6 +147,8 @@ class StartAction(RequestType):
     tag="Actions", feature="files", status=201, errors=(404, 409),
     description="Queues a run and answers it. A file that is not a readable PDF, or one with no bookmarks for "
     "an action that needs them, is a 409.",
+    mcp_note="Follow it with runs_get until its state is done, then runs_download_url.",
+    mcp="actions_start", enabled=files_on,
 )
 def start_action(request: Request, body: StartAction) -> RunRow:
     started = _start(request, body.action, body.file_id, body.options)
@@ -169,6 +201,7 @@ class StartManyReply(Reply):
     tag="Actions", feature="files", status=201, errors=(404,),
     description="One run per file, in one request: what a dropped folder needs. A file that cannot take the "
     "action is listed in skipped with why, and the rest still start.",
+    mcp="actions_start_many", enabled=files_on,
 )
 def start_many(request: Request, body: StartMany) -> StartManyReply:
     if body.action not in ACTIONS:
@@ -200,6 +233,7 @@ class RunsReply(Paged):
     "GET /api/runs", summary="List your runs",
     tag="Actions", feature="files",
     description="Newest first unless sorted: each run, how far it has got, and how many files it made.",
+    mcp="runs_list", read_only=True, enabled=files_on,
 )
 def list_runs(request: Request, body: ListRuns) -> RunsReply:
     store = get_store(request)
@@ -221,6 +255,7 @@ class RunIDPath(RequestType):
     "GET /api/runs/{run_id}", summary="One of your runs",
     tag="Actions", feature="files",
     description="The run and the files it made, in order.",
+    mcp="runs_get", read_only=True, enabled=files_on,
 )
 def get_run(request: Request, body: RunIDPath) -> RunDetail:
     one = _mine(request, body.run_id)
@@ -234,7 +269,8 @@ def get_run(request: Request, body: RunIDPath) -> RunDetail:
     "POST /api/runs/{run_id}/cancel", summary="Cancel a run",
     tag="Actions", feature="files", errors=(409,),
     description="A queued run is cancelled at once, a running one at its next step; what it made so far goes "
-    "to the bin.",
+    "to the bin. A step of a chain stops the whole chain.",
+    mcp="runs_cancel", destructive=True, enabled=files_on,
 )
 def cancel_run(request: Request, body: RunIDPath) -> OkReply:
     one = _mine(request, body.run_id)
@@ -242,7 +278,12 @@ def cancel_run(request: Request, body: RunIDPath) -> OkReply:
         raise Refused(404, NO_SUCH_RUN)
     if one.state in models.FINISHED:
         raise Refused(409, "that run has finished")
-    request.app.state.runner.cancel(one.id)
+    if one.chain_id:
+        from app.models import chains
+
+        chains.cancel_chain(get_store(request), one.chain_id)
+    else:
+        request.app.state.runner.cancel(one.id)
     audit(request, KIND_ADMIN, "run cancelled", {"run_id": one.id})
     return OkReply(ok=True)
 
@@ -251,13 +292,16 @@ def cancel_run(request: Request, body: RunIDPath) -> OkReply:
     "POST /api/runs/{run_id}/restart", summary="Start a cancelled or failed run again",
     tag="Actions", feature="files", errors=(409,),
     description="Queues the run again from the beginning, on the same file with the same options. A run that "
-    "is queued, running or done, or one whose PDF is gone, is a 409.",
+    "is queued, running or done, one whose PDF is gone, or a step of a chain (restart the chain instead), is a 409.",
+    mcp="runs_restart", enabled=files_on,
 )
 def restart_run(request: Request, body: RunIDPath) -> RunRow:
     store = get_store(request)
     one = _mine(request, body.run_id)
     if one is None:
         raise Refused(404, NO_SUCH_RUN)
+    if one.chain_id:
+        raise Refused(409, "that run is a step of a chain: restart the chain")
     if one.state not in models.RESTARTABLE:
         raise Refused(409, "only a cancelled or failed run can start again")
     source = file_models.get_file(store, one.file_id)
@@ -276,6 +320,8 @@ def restart_run(request: Request, body: RunIDPath) -> RunRow:
     tag="Actions", feature="files",
     description="The run and every file it made go to the bin, and can be restored for ten minutes. A run "
     "still going is cancelled first.",
+    mcp_note="runs_restore brings it back.",
+    mcp="runs_delete", destructive=True, enabled=files_on,
 )
 def delete_run(request: Request, body: RunIDPath) -> OkReply:
     one = _mine(request, body.run_id)
@@ -293,6 +339,7 @@ def delete_run(request: Request, body: RunIDPath) -> OkReply:
     "POST /api/runs/{run_id}/restore", summary="Restore a deleted run",
     tag="Actions", feature="files", errors=(409,),
     description="Brings back a run you deleted, with its files, while they are still in the bin.",
+    mcp="runs_restore", enabled=files_on,
 )
 def restore_run(request: Request, body: RunIDPath) -> RunRow:
     store, user = get_store(request), actor_from(request).user
@@ -360,6 +407,10 @@ def zip_stream(cfg: Config, made: list[file_models.File], folders: list[str] | N
     "GET /api/runs/{run_id}/download", summary="Download everything a run made",
     tag="Actions", feature="files", reply_type="application/zip",
     reply_description="A zip of the run's files, stored as they are, always as an attachment",
+    mcp_title="Where to download what a run made",
+    mcp_description="The address of a finished run's zip, and of each file it made. GET them over HTTP with the "
+    "same Authorization: Bearer header this MCP connection uses; the bytes do not come through MCP.",
+    mcp="runs_download_url", read_only=True, enabled=files_on, call=run_download_url,
 )
 async def download_run(request: Request, body: RunIDPath) -> Response:
     one = await run(_mine, request, body.run_id)
@@ -368,8 +419,7 @@ async def download_run(request: Request, body: RunIDPath) -> Response:
     made = await run(models.outputs_of, get_store(request), one)
     if not made:
         raise Refused(404, "that run made nothing to download")
-    stem = PurePosixPath(one.file_name).stem or "sections"
-    headers = {"Content-Disposition": content_disposition(f"{stem} - sections.zip"), "Cache-Control": "private, no-store"}
+    headers = {"Content-Disposition": content_disposition(zip_name(one.action, one.file_name)), "Cache-Control": "private, no-store"}
     if request.method == "HEAD":
         return Response(media_type="application/zip", headers=headers)
     return StreamingResponse(zip_stream(get_config(request), made), media_type="application/zip", headers=headers)
@@ -385,9 +435,12 @@ class RunIDs(RequestType):
     reply_description="One zip, a folder per run named after its PDF, always as an attachment",
     description="What a tool screen offers once a batch is done. A run that is not yours, or made nothing, is "
     "left out; none left is a 404.",
+    mcp_http="File bytes: MCP messages are JSON, and clients cap their size. runs_download_url gives each run's.",
 )
 async def download_runs(request: Request, body: RunIDs) -> Response:
     ids = list(dict.fromkeys(part for part in body.ids.split(",") if part))[:1000]
+
+    actions: set[str] = set()
 
     def gather() -> tuple[list[file_models.File], list[str]]:
         store = get_store(request)
@@ -405,6 +458,7 @@ async def download_runs(request: Request, body: RunIDs) -> Response:
                 folder = f"{base} ({counter})"
                 counter += 1
             taken.add(folder.lower())
+            actions.add(one.action)
             made.extend(files)
             folders.extend([folder] * len(files))
         return made, folders
@@ -413,7 +467,8 @@ async def download_runs(request: Request, body: RunIDs) -> Response:
     if not made:
         raise Refused(404, "those runs made nothing to download")
     several = len(set(folders)) > 1
-    name = f"PDFTools - {len(made)} files.zip" if several else f"{folders[0]} - sections.zip"
+    suffix = ZIP_SUFFIX.get(next(iter(actions)), "files") if len(actions) == 1 else "files"
+    name = f"PDFTools - {len(made)} files.zip" if several else f"{folders[0]} - {suffix}.zip"
     headers = {"Content-Disposition": content_disposition(name), "Cache-Control": "private, no-store"}
     if request.method == "HEAD":
         return Response(media_type="application/zip", headers=headers)
@@ -426,6 +481,7 @@ async def download_runs(request: Request, body: RunIDs) -> Response:
     tag="Actions", feature="files", reply_type="text/event-stream", errors=(403, 503),
     description="Server-sent events: \"runs\" when a run moves, \"files\" when an import has been read. Each "
     "only says something changed; fetch the list again.",
+    mcp_http="A stream for browsers, which needs a session. An agent polls runs_get or chains_get instead.",
 )
 async def stream_changes(request: Request) -> Response:
     if request.method == "HEAD":

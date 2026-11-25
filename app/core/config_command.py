@@ -269,6 +269,7 @@ def command_shell(args: argparse.Namespace) -> None:
             ("public_url", file.server.public_url),
             ("secure_cookies", _flag(file.server.secure_cookies)),
             ("trust_proxy", _flag(file.server.trust_proxy)),
+            ("separate_worker", _flag(file.files.separate_worker)),
         ]
     else:
         docker = file.docker
@@ -288,6 +289,11 @@ def command_shell(args: argparse.Namespace) -> None:
             ("docker_cpus", docker.cpus),
             ("docker_pids_limit", str(docker.pids_limit)),
             ("docker_tmpfs_size", docker.tmpfs_size),
+            ("docker_worker", _flag(file.files.separate_worker)),
+            ("docker_worker_container", docker.worker_container),
+            ("docker_worker_memory", docker.worker_memory),
+            ("docker_worker_cpus", docker.worker_cpus),
+            ("docker_worker_pids_limit", str(docker.worker_pids_limit)),
             ("server_port", str(file.server.port)),
             ("server_secure_cookies", _flag(file.server.secure_cookies)),
             ("server_trust_proxy", _flag(file.server.trust_proxy)),

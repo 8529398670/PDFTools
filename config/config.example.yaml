@@ -157,6 +157,11 @@ server:
   # [live]
   rate_limit_upload_max: 6000
 
+  # POST /mcp: the Model Context Protocol, so an agent (Claude Code, any MCP
+  # client that can send a header) can use this app with an API key, at that
+  # key's role. Only keys are accepted there, never a browser session. Needs
+  # auth.api_keys; false makes /mcp answer 404. [live]
+  mcp: true
 
   # Maintenance mode. none is normal running. read_only keeps the app readable
   # and refuses every write; full refuses everything. Either way the owner's
@@ -258,6 +263,11 @@ files:
   encrypt: false                   # [live]
   # How many actions (a split, ...) run at the same time.
   workers: 2                       # [restart]
+  # Run actions in a process of their own (`python -m app worker`, which
+  # scripts/run.sh starts beside the server and docker/run.sh starts as the
+  # docker.worker_container container), never in the web server's. Off, the
+  # web server runs them itself, and no worker is started.
+  separate_worker: true            # [restart]
 
 # [scripts] Read by docker/run.sh, which applies a change the next time it
 # runs. Edit these on the host: inside the container they are read-only.
@@ -278,9 +288,19 @@ docker:
 
   restart: unless-stopped          # no | always | unless-stopped | on-failure[:N]
 
-  # Blast-radius limits. Sized for qpdf on large books (2 run + 2 look
-  # workers) with headroom for the coming YOLO section finder.
-  memory: 4g
-  cpus: "4"
+  # Blast-radius limits for the web server. With files.separate_worker it only
+  # serves pages and takes the first look at each upload, so it needs little.
+  memory: 1g
+  cpus: "2"
   pids_limit: 512
   tmpfs_size: 16m                  # the only writable path besides data_dir
+
+  # The worker that runs actions (files.separate_worker), in a container of
+  # its own built from docker/Dockerfile.worker (Debian, for the YOLO section
+  # finder's wheels). It mounts the same data directory and config, publishes
+  # no port and has no network. Sized for qpdf on large books (files.workers
+  # at once) with headroom for YOLO.
+  worker_container: pdftools-worker
+  worker_memory: 4g
+  worker_cpus: "4"
+  worker_pids_limit: 512

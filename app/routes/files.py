@@ -36,6 +36,7 @@ from app.models import users
 from app.routes.admin import OkReply
 from app.routes.helpers import DateTime, Dir, Page, Paged, Refused, get_config, get_store, match_rows, not_found, restore_refusal, run, sorted_page
 from app.routes.logs import audit
+from app.routes.mcp_tools import files_download_url, files_on, files_start_upload
 
 LOST = "upload_lost"
 NO_SUCH_FILE = "no such file"
@@ -166,6 +167,7 @@ class MyStorage(Reply):
     "GET /api/account/storage", summary="Your storage",
     tag="Files", feature="files",
     description="How many bytes your files use, and your quota (0 is no limit).",
+    mcp="my_storage", read_only=True, enabled=files_on,
 )
 def my_storage(request: Request) -> MyStorage:
     """How much of the quota an account has used, so it finds out before an
@@ -191,6 +193,7 @@ class AllStorage(Reply, kw_only=True):
     tag="Files", role=ADMIN, feature="files",
     description="How many bytes everyone's files use together as quotas count them, what they take on "
     "disk with shared content stored once, and the disk's free and total bytes where the system says.",
+    mcp="admin_storage", read_only=True, enabled=files_on,
 )
 def all_storage(request: Request) -> AllStorage:
     """Every account's files together, and what room the disk has left, which
@@ -222,6 +225,7 @@ class FilesReply(Paged):
     tag="Files", feature="files",
     description="Your uploaded files, a page at a time: id, name, type, size, state (uploading or ready) "
     "and when. next is the offset of the following page, or null on the last one.",
+    mcp="files_list", read_only=True, enabled=files_on,
 )
 def list_my_files(request: Request, body: ListMyFiles) -> FilesReply:
     """The caller's files, over HTTP and as the MCP files_list tool."""
@@ -245,6 +249,7 @@ class OwnedFilesReply(Paged):
     tag="Files", role=ADMIN, feature="files",
     description="Every account's files, a page at a time, with whose each one is (user_id, user_name). next "
     "is the offset of the following page, or null on the last one.",
+    mcp="admin_list_files", read_only=True, enabled=files_on,
 )
 def list_all_files(request: Request, body: ListAllFiles) -> OwnedFilesReply:
     """Adds who each file belongs to. The names, sizes and owners are what an
@@ -279,6 +284,13 @@ class CreateFile(RequestType):
     description="Then send every piece, in any order and several at once, and finish. A file over files.max_file_bytes, or one that "
     "would pass files.quota_bytes_per_user, is a 409.",
     reply_description="Created",
+    mcp_title="Start uploading a file",
+    mcp_description="Reserve room for a file and get where to send it. The bytes do not go through MCP: "
+    "POST each piece of chunk_bytes bytes (the last may be shorter), in order from index 0, as the raw body "
+    "(Content-Type: application/octet-stream) to chunk_url with {index} filled in and the same "
+    "Authorization: Bearer header this MCP connection uses. curl is a shell recipe that does all of it. "
+    "Then call files_finish_upload.",
+    mcp="files_start_upload", enabled=files_on, call=files_start_upload,
 )
 def create_file(request: Request, body: CreateFile) -> FileUpload:
     """Start an upload, over HTTP and as the MCP files_start_upload tool."""
@@ -374,6 +386,7 @@ def answer_claim(request: Request, body: AnswerClaim) -> File:
     tag="Files", feature="files",
     description="One file: its details, and for an unfinished upload which pieces are still to send "
     "(missing), which is where to resume.",
+    mcp="files_get", read_only=True, enabled=files_on,
 )
 def get_my_file(request: Request, body: FileIDPath) -> FileUpload:
     """How a client finds out where to resume: see missing."""
@@ -436,6 +449,7 @@ async def put_chunk(request: Request, body: PutChunk) -> PutChunkReply:
     tag="Files", feature="files", errors=(409,),
     description="Seal an upload once every piece has arrived; the file is then ready to download. Asked "
     "again, it answers the same. If pieces are missing it says how many arrived (received).",
+    mcp="files_finish_upload", enabled=files_on,
 )
 def finish_file(request: Request, body: FileIDPath) -> File:
     """Seal an upload whose pieces have all arrived, over HTTP and as the MCP
@@ -508,6 +522,10 @@ async def _send(request: Request, file: models.File) -> Response:
     "GET /api/files/{file_id}/download", summary="Download one of your files",
     tag="Files", feature="files", reply_type="application/octet-stream",
     reply_description="The file, always as an attachment",
+    mcp_title="Where to download a file",
+    mcp_description="The address of one of your files. GET it over HTTP with the same Authorization: Bearer "
+    "header this MCP connection uses; the bytes do not come through MCP.",
+    mcp="files_download_url", read_only=True, enabled=files_on, call=files_download_url,
 )
 async def download_my_file(request: Request, body: FileIDPath) -> Response:
     file = await run(_mine, request, body.file_id)
@@ -569,6 +587,7 @@ def _rename(request: Request, body: RenameFile, own_only: bool) -> RenameFileRep
     tag="Files", feature="files", errors=(409,),
     description="Give one of your files a new name. expect, when given, is the name you think it has now; a "
     "rename made meanwhile is refused with the current name.",
+    mcp="files_rename", enabled=files_on,
 )
 def rename_my_file(request: Request, body: RenameFile) -> RenameFileReply:
     """Over HTTP and as the MCP files_rename tool."""
@@ -602,6 +621,8 @@ def _delete(request: Request, file_id: str, own_only: bool) -> OkReply:
     tag="Files", feature="files",
     description="Move one of your files to the bin. It can be restored for ten minutes; after that it is "
     "gone.",
+    mcp_note="files_restore brings it back.",
+    mcp="files_delete", destructive=True, enabled=files_on,
 )
 def delete_my_file(request: Request, body: FileIDPath) -> OkReply:
     """Over HTTP and as the MCP files_delete tool."""
@@ -641,6 +662,7 @@ def _restore(request: Request, file_id: str, as_admin: bool) -> File:
     tag="Files", feature="files", errors=(409,),
     description="Bring back a file you deleted, while it is still in the bin and your storage quota has "
     "room.",
+    mcp="files_restore", enabled=files_on,
 )
 def restore_my_file(request: Request, body: FileIDPath) -> File:
     """Over HTTP and as the MCP files_restore tool."""

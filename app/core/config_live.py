@@ -134,6 +134,7 @@ def live_config(boot: Config, boot_file: config.File, file: config.File) -> Conf
         rate_limit_window_seconds=file.server.rate_limit_window_seconds,
         rate_limit_signin_max=file.server.rate_limit_signin_max,
         rate_limit_upload_max=file.server.rate_limit_upload_max,
+        mcp_enabled=file.server.mcp,
         maintenance=file.server.maintenance,
         announcement=file.server.announcement,
         repo=config.clean_repo(file.app.repo),

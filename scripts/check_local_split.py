@@ -93,7 +93,7 @@ def server_split(source: Path, out: Path, options: dict) -> dict:
         made.rename(out / name)
         files.append({"name": name, **meta})
 
-    context = Context(run_id="check", source=source, work=out, source_info={},
+    context = Context(run_id="check", source=source, source_name=source.name, work=out, source_info={},
                       progress=lambda *_: None, cancelled=lambda: False, add_output=add)
     return {"result": run(context, Options(**options)), "files": files}
 

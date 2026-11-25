@@ -677,6 +677,21 @@
             "type": "boolean",
             "x-feature": "api_keys"
           },
+          "mcp_doc_url": {
+            "description": "Where to read the MCP tools as a page for people: config/mcp.md in app.repo, or /docs/mcp when there is no repo.",
+            "type": "string",
+            "x-feature": "mcp"
+          },
+          "mcp_enabled": {
+            "description": "server.mcp: whether POST /mcp answers.",
+            "type": "boolean",
+            "x-feature": "mcp"
+          },
+          "mcp_url": {
+            "description": "Where to read the MCP reference: config/mcp.json in app.repo, or /api/mcp.json when there is no repo. Only with server.mcp on.",
+            "type": "string",
+            "x-feature": "mcp"
+          },
           "openapi_url": {
             "description": "Where to read this API's reference: config/api.json in app.repo, or /api/api.json when there is no repo.",
             "type": "string",
@@ -789,6 +804,9 @@
           "logs_enabled",
           "logs_ui_clicks",
           "maintenance",
+          "mcp_doc_url",
+          "mcp_enabled",
+          "mcp_url",
           "openapi_url",
           "owner",
           "repo",
@@ -3271,6 +3289,10 @@
                           "action": {
                             "type": "string"
                           },
+                          "chain_id": {
+                            "description": "The chain this run is a step of, or empty.",
+                            "type": "string"
+                          },
                           "created_at": {
                             "format": "date-time",
                             "type": "string"
@@ -3333,10 +3355,15 @@
                           "step": {
                             "description": "What it is doing now: the file it is writing.",
                             "type": "string"
+                          },
+                          "step_index": {
+                            "description": "Which step of its chain, from 0.",
+                            "type": "integer"
                           }
                         },
                         "required": [
                           "action",
+                          "chain_id",
                           "created_at",
                           "file_id",
                           "file_name",
@@ -3350,7 +3377,8 @@
                           "result",
                           "started_at",
                           "state",
-                          "step"
+                          "step",
+                          "step_index"
                         ],
                         "type": "object"
                       },
@@ -7684,6 +7712,1003 @@
       },
       "x-feature": "files"
     },
+    "/api/chains": {
+      "get": {
+        "description": "Newest first: each chain, how far it has got, and how many files its last step made.",
+        "operationId": "get_api_chains",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "chains": {
+                      "items": {
+                        "properties": {
+                          "created_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "file_id": {
+                            "type": "string"
+                          },
+                          "file_name": {
+                            "type": "string"
+                          },
+                          "finished_at": {
+                            "format": "date-time",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "description": "Why it stopped, as a code: the failed step's.",
+                            "type": "string"
+                          },
+                          "output_bytes": {
+                            "type": "integer"
+                          },
+                          "outputs": {
+                            "description": "How many files its last step made that are still here.",
+                            "type": "integer"
+                          },
+                          "progress": {
+                            "description": "0 to 1, each step an equal share.",
+                            "type": "number"
+                          },
+                          "runs": {
+                            "description": "How many runs its steps have made so far.",
+                            "type": "integer"
+                          },
+                          "state": {
+                            "enum": [
+                              "running",
+                              "done",
+                              "failed",
+                              "cancelled"
+                            ],
+                            "type": "string"
+                          },
+                          "steps": {
+                            "items": {
+                              "type": "object"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "created_at",
+                          "file_id",
+                          "file_name",
+                          "finished_at",
+                          "id",
+                          "message",
+                          "output_bytes",
+                          "outputs",
+                          "progress",
+                          "runs",
+                          "state",
+                          "steps"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "chains"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "List your chains",
+        "tags": [
+          "Chains"
+        ]
+      },
+      "post": {
+        "description": "One chain per file: its first step runs on the file, and each later step on every file the step before made, so split then compress compresses each section. Every step's options are checked before anything starts. A file that cannot take the first step is listed in skipped with why.",
+        "operationId": "post_api_chains",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  },
+                  "file_ids": {
+                    "description": "Your imported PDFs, up to 1000: one chain each.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 1000,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "steps": {
+                    "description": "The actions, in order. Each later one runs on every file the one before made.",
+                    "items": {
+                      "properties": {
+                        "action": {
+                          "description": "An action's name, from GET /api/actions.",
+                          "type": "string"
+                        },
+                        "options": {
+                          "description": "Its options; any left out take their default.",
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "action"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 10,
+                    "minItems": 1,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "file_ids",
+                  "steps"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "chains": {
+                      "items": {
+                        "properties": {
+                          "created_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "file_id": {
+                            "type": "string"
+                          },
+                          "file_name": {
+                            "type": "string"
+                          },
+                          "finished_at": {
+                            "format": "date-time",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "description": "Why it stopped, as a code: the failed step's.",
+                            "type": "string"
+                          },
+                          "output_bytes": {
+                            "type": "integer"
+                          },
+                          "outputs": {
+                            "description": "How many files its last step made that are still here.",
+                            "type": "integer"
+                          },
+                          "progress": {
+                            "description": "0 to 1, each step an equal share.",
+                            "type": "number"
+                          },
+                          "runs": {
+                            "description": "How many runs its steps have made so far.",
+                            "type": "integer"
+                          },
+                          "state": {
+                            "enum": [
+                              "running",
+                              "done",
+                              "failed",
+                              "cancelled"
+                            ],
+                            "type": "string"
+                          },
+                          "steps": {
+                            "items": {
+                              "type": "object"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "created_at",
+                          "file_id",
+                          "file_name",
+                          "finished_at",
+                          "id",
+                          "message",
+                          "output_bytes",
+                          "outputs",
+                          "progress",
+                          "runs",
+                          "state",
+                          "steps"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "skipped": {
+                      "items": {
+                        "properties": {
+                          "error": {
+                            "description": "Why it was not started: no such file, not_readable, no_bookmarks.",
+                            "type": "string"
+                          },
+                          "file_id": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "error",
+                          "file_id"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "chains",
+                    "skipped"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Start a chain of actions on PDFs",
+        "tags": [
+          "Chains"
+        ]
+      },
+      "x-feature": "files"
+    },
+    "/api/chains/download": {
+      "get": {
+        "description": "What the chain screen offers once a batch is done. A chain that is not yours, or made nothing, is left out; none left is a 404.",
+        "operationId": "get_api_chains_download",
+        "parameters": [
+          {
+            "description": "Your chains' ids, comma-separated, up to 1000.",
+            "in": "query",
+            "name": "ids",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "One zip, a folder per chain named after its PDF, always as an attachment"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Download what several chains made",
+        "tags": [
+          "Chains"
+        ],
+        "x-mcp-http": "File bytes: MCP messages are JSON, and clients cap their size. chains_download_url gives each chain's."
+      },
+      "x-feature": "files"
+    },
+    "/api/chains/{chain_id}": {
+      "get": {
+        "description": "The chain, every run of its steps, and the files its last step made.",
+        "operationId": "get_api_chains_chain_id",
+        "parameters": [
+          {
+            "description": "The chain's id, from GET /api/chains.",
+            "in": "path",
+            "name": "chain_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "file_id": {
+                      "type": "string"
+                    },
+                    "file_name": {
+                      "type": "string"
+                    },
+                    "files": {
+                      "description": "What the last step made: what the chain made.",
+                      "items": {
+                        "$ref": "#/components/schemas/File"
+                      },
+                      "type": "array"
+                    },
+                    "finished_at": {
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "description": "Why it stopped, as a code: the failed step's.",
+                      "type": "string"
+                    },
+                    "output_bytes": {
+                      "type": "integer"
+                    },
+                    "outputs": {
+                      "description": "How many files its last step made that are still here.",
+                      "type": "integer"
+                    },
+                    "progress": {
+                      "description": "0 to 1, each step an equal share.",
+                      "type": "number"
+                    },
+                    "runs": {
+                      "description": "How many runs its steps have made so far.",
+                      "type": "integer"
+                    },
+                    "state": {
+                      "enum": [
+                        "running",
+                        "done",
+                        "failed",
+                        "cancelled"
+                      ],
+                      "type": "string"
+                    },
+                    "step_runs": {
+                      "description": "Every run of every step, by step.",
+                      "items": {
+                        "properties": {
+                          "action": {
+                            "type": "string"
+                          },
+                          "chain_id": {
+                            "description": "The chain this run is a step of, or empty.",
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "file_id": {
+                            "type": "string"
+                          },
+                          "file_name": {
+                            "type": "string"
+                          },
+                          "finished_at": {
+                            "format": "date-time",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "description": "Why it failed, as a code.",
+                            "type": "string"
+                          },
+                          "options": {
+                            "type": "object"
+                          },
+                          "output_bytes": {
+                            "type": "integer"
+                          },
+                          "outputs": {
+                            "description": "How many of the files it made are still here.",
+                            "type": "integer"
+                          },
+                          "progress": {
+                            "description": "0 to 1.",
+                            "type": "number"
+                          },
+                          "result": {
+                            "description": "What it reported when done, such as how many sections.",
+                            "type": "object"
+                          },
+                          "started_at": {
+                            "format": "date-time",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "state": {
+                            "enum": [
+                              "queued",
+                              "running",
+                              "done",
+                              "failed",
+                              "cancelled"
+                            ],
+                            "type": "string"
+                          },
+                          "step": {
+                            "description": "What it is doing now: the file it is writing.",
+                            "type": "string"
+                          },
+                          "step_index": {
+                            "description": "Which step of its chain, from 0.",
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "action",
+                          "chain_id",
+                          "created_at",
+                          "file_id",
+                          "file_name",
+                          "finished_at",
+                          "id",
+                          "message",
+                          "options",
+                          "output_bytes",
+                          "outputs",
+                          "progress",
+                          "result",
+                          "started_at",
+                          "state",
+                          "step",
+                          "step_index"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "steps": {
+                      "items": {
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "created_at",
+                    "file_id",
+                    "file_name",
+                    "files",
+                    "finished_at",
+                    "id",
+                    "message",
+                    "output_bytes",
+                    "outputs",
+                    "progress",
+                    "runs",
+                    "state",
+                    "step_runs",
+                    "steps"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "One of your chains",
+        "tags": [
+          "Chains"
+        ]
+      },
+      "x-feature": "files"
+    },
+    "/api/chains/{chain_id}/cancel": {
+      "post": {
+        "description": "Every step still to finish is cancelled, a running one at its next step.",
+        "operationId": "post_api_chains_chain_id_cancel",
+        "parameters": [
+          {
+            "description": "The chain's id, from GET /api/chains.",
+            "in": "path",
+            "name": "chain_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Stop a chain",
+        "tags": [
+          "Chains"
+        ]
+      },
+      "x-feature": "files"
+    },
+    "/api/chains/{chain_id}/delete": {
+      "post": {
+        "description": "The chain, its runs and every file they made go to the bin. A chain still going is stopped first.",
+        "operationId": "post_api_chains_chain_id_delete",
+        "parameters": [
+          {
+            "description": "The chain's id, from GET /api/chains.",
+            "in": "path",
+            "name": "chain_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Delete a chain",
+        "tags": [
+          "Chains"
+        ]
+      },
+      "x-feature": "files"
+    },
+    "/api/chains/{chain_id}/download": {
+      "get": {
+        "operationId": "get_api_chains_chain_id_download",
+        "parameters": [
+          {
+            "description": "The chain's id, from GET /api/chains.",
+            "in": "path",
+            "name": "chain_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "A zip of the last step's files, stored as they are, always as an attachment"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Download what a chain made",
+        "tags": [
+          "Chains"
+        ]
+      },
+      "x-feature": "files"
+    },
+    "/api/chains/{chain_id}/restart": {
+      "post": {
+        "description": "Every run of a failed or cancelled chain that failed or was cancelled is queued again; what its steps finished stays.",
+        "operationId": "post_api_chains_chain_id_restart",
+        "parameters": [
+          {
+            "description": "The chain's id, from GET /api/chains.",
+            "in": "path",
+            "name": "chain_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "csrf_token": {
+                    "description": "From GET /api/me. Browser sessions only.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "file_id": {
+                      "type": "string"
+                    },
+                    "file_name": {
+                      "type": "string"
+                    },
+                    "finished_at": {
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "description": "Why it stopped, as a code: the failed step's.",
+                      "type": "string"
+                    },
+                    "output_bytes": {
+                      "type": "integer"
+                    },
+                    "outputs": {
+                      "description": "How many files its last step made that are still here.",
+                      "type": "integer"
+                    },
+                    "progress": {
+                      "description": "0 to 1, each step an equal share.",
+                      "type": "number"
+                    },
+                    "runs": {
+                      "description": "How many runs its steps have made so far.",
+                      "type": "integer"
+                    },
+                    "state": {
+                      "enum": [
+                        "running",
+                        "done",
+                        "failed",
+                        "cancelled"
+                      ],
+                      "type": "string"
+                    },
+                    "steps": {
+                      "items": {
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "created_at",
+                    "file_id",
+                    "file_name",
+                    "finished_at",
+                    "id",
+                    "message",
+                    "output_bytes",
+                    "outputs",
+                    "progress",
+                    "runs",
+                    "state",
+                    "steps"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Start a stopped chain again",
+        "tags": [
+          "Chains"
+        ]
+      },
+      "x-feature": "files"
+    },
     "/api/claims": {
       "post": {
         "description": "Before uploading, say the file's fingerprint. When the server already holds that content (anyone's), it asks for the SHA-256 of a few random ranges of the file; a right answer to POST /api/claims/{claim_id} adds the file without sending it. The same checks as an upload come first: a file over files.max_file_bytes, or one that would pass your quota, is a 409. Ten minutes to answer.",
@@ -8470,6 +9495,10 @@
                     "action": {
                       "type": "string"
                     },
+                    "chain_id": {
+                      "description": "The chain this run is a step of, or empty.",
+                      "type": "string"
+                    },
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
@@ -8532,10 +9561,15 @@
                     "step": {
                       "description": "What it is doing now: the file it is writing.",
                       "type": "string"
+                    },
+                    "step_index": {
+                      "description": "Which step of its chain, from 0.",
+                      "type": "integer"
                     }
                   },
                   "required": [
                     "action",
+                    "chain_id",
                     "created_at",
                     "file_id",
                     "file_name",
@@ -8549,7 +9583,8 @@
                     "result",
                     "started_at",
                     "state",
-                    "step"
+                    "step",
+                    "step_index"
                   ],
                   "type": "object"
                 }
@@ -9394,6 +10429,9 @@
           },
           "400": {
             "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
           },
           "403": {
             "$ref": "#/components/responses/E403"
@@ -10384,6 +11422,92 @@
         "x-mcp-http": "The browser's own activity reports (track.js), not an action."
       },
       "x-feature": "logs"
+    },
+    "/api/mcp.json": {
+      "get": {
+        "operationId": "get_api_mcp_json",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "The MCP tools: every tool /mcp has, its arguments, and the route it stands for",
+        "tags": [
+          "Monitoring"
+        ],
+        "x-mcp-http": "The MCP reference itself; tools/list gives the same list."
+      },
+      "x-feature": "mcp"
+    },
+    "/api/mcp.md": {
+      "get": {
+        "operationId": "get_api_mcp_md",
+        "responses": {
+          "200": {
+            "content": {
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "The MCP tools as Markdown tables for people",
+        "tags": [
+          "Monitoring"
+        ],
+        "x-mcp-http": "The MCP reference itself, for people; tools/list gives the same list."
+      },
+      "x-feature": "mcp"
     },
     "/api/me": {
       "get": {
@@ -11557,6 +12681,10 @@
                           "action": {
                             "type": "string"
                           },
+                          "chain_id": {
+                            "description": "The chain this run is a step of, or empty.",
+                            "type": "string"
+                          },
                           "created_at": {
                             "format": "date-time",
                             "type": "string"
@@ -11619,10 +12747,15 @@
                           "step": {
                             "description": "What it is doing now: the file it is writing.",
                             "type": "string"
+                          },
+                          "step_index": {
+                            "description": "Which step of its chain, from 0.",
+                            "type": "integer"
                           }
                         },
                         "required": [
                           "action",
+                          "chain_id",
                           "created_at",
                           "file_id",
                           "file_name",
@@ -11636,7 +12769,8 @@
                           "result",
                           "started_at",
                           "state",
-                          "step"
+                          "step",
+                          "step_index"
                         ],
                         "type": "object"
                       },
@@ -11740,7 +12874,8 @@
         "summary": "Download everything several runs made",
         "tags": [
           "Actions"
-        ]
+        ],
+        "x-mcp-http": "File bytes: MCP messages are JSON, and clients cap their size. runs_download_url gives each run's."
       },
       "x-feature": "files"
     },
@@ -11786,7 +12921,8 @@
         "summary": "Hear when your runs or files change",
         "tags": [
           "Actions"
-        ]
+        ],
+        "x-mcp-http": "A stream for browsers, which needs a session. An agent polls runs_get or chains_get instead."
       },
       "x-feature": "files"
     },
@@ -11812,6 +12948,10 @@
                 "schema": {
                   "properties": {
                     "action": {
+                      "type": "string"
+                    },
+                    "chain_id": {
+                      "description": "The chain this run is a step of, or empty.",
                       "type": "string"
                     },
                     "created_at": {
@@ -11882,10 +13022,15 @@
                     "step": {
                       "description": "What it is doing now: the file it is writing.",
                       "type": "string"
+                    },
+                    "step_index": {
+                      "description": "Which step of its chain, from 0.",
+                      "type": "integer"
                     }
                   },
                   "required": [
                     "action",
+                    "chain_id",
                     "created_at",
                     "file_id",
                     "file_name",
@@ -11900,7 +13045,8 @@
                     "result",
                     "started_at",
                     "state",
-                    "step"
+                    "step",
+                    "step_index"
                   ],
                   "type": "object"
                 }
@@ -11941,7 +13087,7 @@
     },
     "/api/runs/{run_id}/cancel": {
       "post": {
-        "description": "A queued run is cancelled at once, a running one at its next step; what it made so far goes to the bin.",
+        "description": "A queued run is cancelled at once, a running one at its next step; what it made so far goes to the bin. A step of a chain stops the whole chain.",
         "operationId": "post_api_runs_run_id_cancel",
         "parameters": [
           {
@@ -12170,7 +13316,7 @@
     },
     "/api/runs/{run_id}/restart": {
       "post": {
-        "description": "Queues the run again from the beginning, on the same file with the same options. A run that is queued, running or done, or one whose PDF is gone, is a 409.",
+        "description": "Queues the run again from the beginning, on the same file with the same options. A run that is queued, running or done, one whose PDF is gone, or a step of a chain (restart the chain instead), is a 409.",
         "operationId": "post_api_runs_run_id_restart",
         "parameters": [
           {
@@ -12207,6 +13353,10 @@
                 "schema": {
                   "properties": {
                     "action": {
+                      "type": "string"
+                    },
+                    "chain_id": {
+                      "description": "The chain this run is a step of, or empty.",
                       "type": "string"
                     },
                     "created_at": {
@@ -12271,10 +13421,15 @@
                     "step": {
                       "description": "What it is doing now: the file it is writing.",
                       "type": "string"
+                    },
+                    "step_index": {
+                      "description": "Which step of its chain, from 0.",
+                      "type": "integer"
                     }
                   },
                   "required": [
                     "action",
+                    "chain_id",
                     "created_at",
                     "file_id",
                     "file_name",
@@ -12288,7 +13443,8 @@
                     "result",
                     "started_at",
                     "state",
-                    "step"
+                    "step",
+                    "step_index"
                   ],
                   "type": "object"
                 }
@@ -12374,6 +13530,10 @@
                     "action": {
                       "type": "string"
                     },
+                    "chain_id": {
+                      "description": "The chain this run is a step of, or empty.",
+                      "type": "string"
+                    },
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
@@ -12436,10 +13596,15 @@
                     "step": {
                       "description": "What it is doing now: the file it is writing.",
                       "type": "string"
+                    },
+                    "step_index": {
+                      "description": "Which step of its chain, from 0.",
+                      "type": "integer"
                     }
                   },
                   "required": [
                     "action",
+                    "chain_id",
                     "created_at",
                     "file_id",
                     "file_name",
@@ -12453,7 +13618,8 @@
                     "result",
                     "started_at",
                     "state",
-                    "step"
+                    "step",
+                    "step_index"
                   ],
                   "type": "object"
                 }
@@ -12584,6 +13750,107 @@
           "Account"
         ]
       }
+    },
+    "/mcp": {
+      "delete": {
+        "operationId": "delete_mcp",
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "405": {
+            "description": "Success"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [],
+        "summary": "Refused: this server keeps no sessions",
+        "tags": [
+          "Monitoring"
+        ]
+      },
+      "get": {
+        "operationId": "get_mcp",
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "405": {
+            "description": "Success"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [],
+        "summary": "Refused: this server has no stream",
+        "tags": [
+          "Monitoring"
+        ]
+      },
+      "post": {
+        "operationId": "post_mcp",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "A JSON-RPC 2.0 request.",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          },
+          "503": {
+            "$ref": "#/components/responses/E503"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Model Context Protocol, at the key's role",
+        "tags": [
+          "Monitoring"
+        ],
+        "x-mcp-http": "The MCP endpoint itself."
+      },
+      "x-feature": "mcp"
     }
   },
   "tags": [
@@ -12610,6 +13877,9 @@
     },
     {
       "name": "Actions"
+    },
+    {
+      "name": "Chains"
     },
     {
       "name": "Retention"

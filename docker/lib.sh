@@ -260,3 +260,84 @@ wait_healthy() {
     exit 1
   fi
 }
+
+# ---- the worker (files.separate_worker) ----------------------------------
+#
+# Actions run in a container of their own, ${docker_worker_container}, built
+# from docker/Dockerfile.worker (Debian, for the YOLO section finder's
+# wheels) and tagged ${docker_image}-worker. It mounts the same data
+# directory, config.yaml (read-only: it never saves settings) and secret.key,
+# publishes nothing and has no network.
+
+WORKER_DOCKERFILE="docker/Dockerfile.worker"
+# How long a stopping worker gets to hand back the runs it holds.
+WORKER_STOP_WAIT=30
+
+# build_worker_image tags ${docker_image}-worker:latest. Needs the docker_*
+# values build_image sets.
+build_worker_image() {
+  local commit build_date
+  commit="$( git rev-parse --short HEAD 2>/dev/null || echo "unknown" )"
+  build_date="$( date -u +%Y-%m-%dT%H:%M:%SZ )"
+  echo "Building ${docker_image}-worker from ${WORKER_DOCKERFILE}..."
+  docker build \
+    --file "$WORKER_DOCKERFILE" \
+    --tag "${docker_image}-worker:latest" \
+    --build-arg "VERSION=${VERSION:-dev}" \
+    --build-arg "COMMIT=${commit}" \
+    --build-arg "BUILD_DATE=${build_date}" \
+    .
+}
+
+# stop_worker takes the worker's container down without stranding its runs:
+# SIGTERM makes it stop each run at its next step and put it back in the
+# queue (a killed worker's runs wait out their one-minute lease instead).
+stop_worker() {
+  local name="${1:-$docker_worker_container}"
+  [ -n "$( docker ps -aq --filter "name=^${name}\$" )" ] || return 0
+  if [ "$( docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null )" = "true" ]; then
+    docker update --restart no "$name" >/dev/null 2>&1 || true
+    echo "Stopping ${name} (its runs go back in the queue)..."
+    docker stop --time "$WORKER_STOP_WAIT" "$name" >/dev/null 2>&1 || true
+  fi
+  docker rm -f "$name" >/dev/null 2>&1 || true
+}
+
+# start_worker runs the worker image. Answers 1 if it would not start.
+start_worker() {
+  docker run -d \
+    --name "$docker_worker_container" \
+    --restart "$docker_restart" \
+    --stop-timeout "$WORKER_STOP_WAIT" \
+    --network none \
+    -v "${DATA_DIR}:/app/data" \
+    -v "${CONFIG_FILE}:${CONTAINER_CONFIG}:ro" \
+    -v "${SECRET_FILE}:${CONTAINER_SECRET}:ro" \
+    --read-only \
+    --tmpfs "/tmp:rw,nosuid,size=1g" \
+    --cap-drop ALL \
+    --security-opt no-new-privileges:true \
+    --pids-limit "$docker_worker_pids_limit" \
+    --memory "$docker_worker_memory" \
+    --cpus "$docker_worker_cpus" \
+    "${docker_image}-worker:latest" >/dev/null
+}
+
+# wait_worker_healthy waits up to 40 seconds for the worker to check in
+# (python -m app health --worker). Answers 1, with its last log lines, if it
+# does not; the server keeps running either way.
+wait_worker_healthy() {
+  local state
+  echo "Waiting for the worker to check in (up to 40 seconds)..."
+  for _ in $( seq 1 40 ); do
+    sleep 1
+    state="$( docker inspect -f '{{.State.Status}}' "$docker_worker_container" 2>/dev/null || echo "gone" )"
+    [ "$state" = "running" ] || break
+    if docker exec "$docker_worker_container" python -m app health --worker >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  echo "WARNING: ${docker_worker_container} is not checking in (status: ${state:-unknown}). Its last log lines:" >&2
+  docker logs --tail 30 "$docker_worker_container" 2>&1 | sed 's/^/         /' >&2
+  return 1
+}

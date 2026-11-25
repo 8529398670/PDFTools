@@ -1,7 +1,8 @@
 """Restarting a run (POST /api/runs/{id}/restart): a cancelled or failed run
 is queued again on the same file with the same options; anything else is
 refused, and a run whose PDF has gone cannot start again. A cancel spent on a
-queued run must not stop it once it is restarted."""
+queued run must not stop it once it is restarted, and a step of a chain is
+restarted through its chain."""
 from __future__ import annotations
 
 import unittest
@@ -78,14 +79,22 @@ class RestartTest(RoutesTestCase or unittest.TestCase):  # type: ignore[misc]
         status, _ = self.restart(one.id)
         self.assertEqual(status, 404)
 
+    def test_a_chain_step_is_refused(self) -> None:
+        one = self.run_in(runs.FAILED)
+        runs.update(self.store, one.id, chain_id="somechain")
+        status, _ = self.restart(one.id)
+        self.assertEqual(status, 409)
+
     def test_cancel_while_queued_is_spent(self) -> None:
         runner = self.app.state.runner
         source = self.upload(self.user.id)
         one = runs.create_run(self.store, self.user.id, "split_bookmarks", source, {"level": 1})
         runner.cancel(one.id)
         self.assertEqual(runs.get_run(self.store, one.id).state, runs.CANCELLED)
-        runner._run(one.id)  # the worker finds it finished
-        self.assertNotIn(one.id, runner._cancelled)
+        status, _ = self.restart(one.id)
+        self.assertEqual(status, 200)
+        again = runs.get_run(self.store, one.id)
+        self.assertEqual((again.state, again.cancel_requested), (runs.QUEUED, False))
 
 
 if __name__ == "__main__":

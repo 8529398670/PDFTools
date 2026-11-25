@@ -147,6 +147,7 @@ class ServerSection:
     rate_limit_window_seconds: int
     rate_limit_signin_max: int
     rate_limit_upload_max: int
+    mcp: bool
     maintenance: str
     announcement: str
     live_reload: str
@@ -194,6 +195,10 @@ class DockerSection:
     cpus: str
     pids_limit: int
     tmpfs_size: str
+    worker_container: str
+    worker_memory: str
+    worker_cpus: str
+    worker_pids_limit: int
 
 
 @dataclass
@@ -204,6 +209,7 @@ class FilesSection:
     abandoned_upload_hours: int
     encrypt: bool
     workers: int
+    separate_worker: bool
 
 
 @dataclass
@@ -266,6 +272,9 @@ class FilesConfig:
     encrypt: bool = False
     # How many actions (a split, ...) run at once. See app/core/runner.py.
     workers: int = 2
+    # Actions run in their own process, `python -m app worker`, never in the
+    # web server's (app/worker/run.py). Off, the server runs them itself.
+    separate_worker: bool = True
     dir: Path = Path("storage") / "files"
     uploads_dir: Path = Path("uploads")
     work_dir: Path = Path("work")
@@ -391,6 +400,9 @@ class Config:
     # app.show_about: About in the menu.
     show_about: bool = False
 
+    # Whether POST /mcp exists. It answers only API keys, so with
+    # api_keys_enabled off it is not registered either.
+    mcp_enabled: bool = True
 
 
     # The activity log's settings; see app/core/logs.py.
@@ -838,6 +850,11 @@ def validate(file: File) -> list[str]:
     check(bool(_CPUS.match(docker.cpus)), f"docker.cpus must be a number like 1 or 0.5, got {docker.cpus!r}")
     check(docker.pids_limit > 0, "docker.pids_limit must be positive")
     check(bool(_SIZE.match(docker.tmpfs_size)), f"docker.tmpfs_size must look like 16m, got {docker.tmpfs_size!r}")
+    check(bool(_CONTAINER.match(docker.worker_container)), f"docker.worker_container {docker.worker_container!r} is not a valid container name")
+    check(docker.worker_container != docker.container, "docker.worker_container must differ from docker.container")
+    check(bool(_SIZE.match(docker.worker_memory)), f"docker.worker_memory must look like 4g, got {docker.worker_memory!r}")
+    check(bool(_CPUS.match(docker.worker_cpus)), f"docker.worker_cpus must be a number like 1 or 0.5, got {docker.worker_cpus!r}")
+    check(docker.worker_pids_limit > 0, "docker.worker_pids_limit must be positive")
 
     return problems
 
@@ -1061,6 +1078,7 @@ def build_config(file: File, path: Path, paths: "Paths", secret_key: str) -> Con
         trust_proxy=file.server.trust_proxy,
         trusted_proxies=tuple(entry.strip() for entry in file.server.trusted_proxies),
         proxy_header=file.server.proxy_header,
+        mcp_enabled=file.server.mcp,
         maintenance=file.server.maintenance,
         announcement=file.server.announcement,
         live_reload=file.server.live_reload,
@@ -1085,6 +1103,7 @@ def build_config(file: File, path: Path, paths: "Paths", secret_key: str) -> Con
             abandoned_upload_hours=file.files.abandoned_upload_hours,
             encrypt=file.files.encrypt,
             workers=file.files.workers,
+            separate_worker=file.files.separate_worker,
             dir=paths.app_dir / STORAGE_DIR_NAME / FILES_DIR_NAME,
             uploads_dir=paths.app_dir / UPLOADS_DIR_NAME,
             work_dir=paths.app_dir / WORK_DIR_NAME,

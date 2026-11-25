@@ -77,7 +77,7 @@ class BackupError(Exception):
 
 class ServerRunningError(BackupError):
     def __init__(self) -> None:
-        super().__init__("the server is running -- stop it first, restore replaces the database under it")
+        super().__init__("the server or a worker is running -- stop them first, restore replaces the database under it")
 
 
 @dataclass
@@ -269,7 +269,7 @@ def restore(cfg: config.Config, source: str, key_file: str = "") -> RestoreResul
 
 
 def _ensure_stopped(cfg: config.Config) -> None:
-    if server_lock.held(cfg.app_dir / config.SERVER_LOCK_NAME):
+    if server_lock.anything_running(cfg.app_dir, config.SERVER_LOCK_NAME):
         raise ServerRunningError()
 
 

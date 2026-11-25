@@ -1,7 +1,15 @@
-// Split by bookmarks level: the tool screen that splits PDFs in the browser, with
-// qpdf compiled to WebAssembly (js/local/worker.js runs it; the split itself is
-// js/local/split_bookmarks.js, the same split as the server's). The PDFs are
-// never uploaded: the sections are saved straight from this page.
+// The drop zone and batch every tool screen shares (/tools/<tool>: split by
+// bookmarks, rotate, compress, and the chain screen): it runs the tool on the
+// PDFs dropped here, in the browser with qpdf compiled to WebAssembly
+// (js/local/worker.js runs it; each tool's twin is js/local/<tool>.js, making
+// the same files as the server's), or on the server. Run here, the PDFs are
+// never uploaded: what they make is saved straight from this page.
+//
+// There is one card (#local-card); it moves into the slot of whichever tool
+// screen is open (a [data-tool-slot] in index.html), and that screen's
+// data-tool says what it runs. On the chain screen the steps come from
+// js/chain.js; on any other a tool is one step, its options asked for in a
+// dialog (js/tool_options.js) once the PDFs have been read.
 //
 // Where splits run is the account's choice (Tools.mode, set on Account >
 // Where your tools run; see js/tool_modes.js):
@@ -21,7 +29,10 @@
 // per batch, so a run of large sections never sits in memory. Folders older
 // than a day are cleared when the page loads.
 const Local = {
+  // The open screen's tool ("split_bookmarks", "rotate", "compress", "chain"),
+  // and the batch on screen's, which a restart reuses.
   tool: "split_bookmarks",
+  batchTool: "split_bookmarks",
   // Where the choice lived before it moved to the account; cleared on load.
   oldPrefKey: "pdftools-engine.split_bookmarks",
   keepKey: "pdftools-keep-upload",
@@ -39,17 +50,20 @@ const Local = {
   running: false,
   cancelled: false,
   urls: [],
-  // Where the batch on screen ran ("device" or "server"), and the options it
-  // was split with, which a restart reuses.
+  // Where the batch on screen ran ("device" or "server"), and the steps it
+  // ran ([ { action , options } ]), which a restart reuses.
   where: "device",
-  options: null,
+  steps: null,
 
   init( me ) {
     try { window.localStorage.removeItem( this.oldPrefKey ); } catch ( error ) { /* private mode */ }
     if ( me.files_enabled === false ) return;
     const card = Dom.get( "local-card" );
     Dom.show( card , true );
-    Dom.show( Dom.get( "tool-split-bookmarks" ) , true );
+    Dom.all( "[data-tool-view]" ).forEach( ( view ) => {
+      Dom.show( view , true );
+      this.watchDrops( view );
+    } );
     [ [ "local-pick-button" , "local-pick" ] , [ "local-pick-folder-button" , "local-pick-folder" ] ].forEach( ( pair ) => {
       const input = Dom.get( pair[ 1 ] );
       Dom.get( pair[ 0 ] ).addEventListener( "click" , () => input.click() );
@@ -69,16 +83,40 @@ const Local = {
     keep.addEventListener( "change" , () => {
       try { window.localStorage.setItem( this.keepKey , keep.value ); } catch ( error ) { /* private mode */ }
     } );
-    // Re-check where splits run when the account's choice changes.
-    window.addEventListener( "nav" , () => this.paintEngine() );
+    // Follow the open tool screen, and re-check where it runs when the
+    // account's choice changes.
+    window.addEventListener( "nav" , () => this.follow_screen() );
     Dom.onPress( Dom.get( "local-save-folder" ) , () => this.saveToFolder() );
-    this.watchDrops( Dom.get( "tool-split-bookmarks" ) );
     window.addEventListener( "beforeunload" , ( event ) => {
       if ( this.running ) event.preventDefault();
     } );
     if ( typeof Fresh !== "undefined" && Fresh.holdWhile ) Fresh.holdWhile( () => this.running );
-    this.paintEngine();
+    this.follow_screen();
     this.sweep();
+  },
+
+  // The card goes into the open tool screen's slot. While a batch runs it
+  // stays the batch's: another tool screen shows it, but runs nothing new.
+  follow_screen() {
+    // Nav marks the open screen with view-active (js/nav.js).
+    const slot = Dom.all( "[data-tool-slot]" ).find( ( one ) => one.closest( ".view-active" ) );
+    if ( slot ) {
+      const card = Dom.get( "local-card" );
+      if ( card.parentNode !== slot ) slot.appendChild( card );
+      if ( !this.running ) this.tool = slot.getAttribute( "data-tool-slot" );
+    }
+    this.paintEngine();
+  },
+
+  // What the open screen runs: the chain's steps, or the tool as one step
+  // (its options asked for later).
+  plannedSteps() {
+    if ( this.tool === "chain" ) return typeof Chain !== "undefined" ? Chain.steps() : [];
+    return [ { action: this.tool , options: null } ];
+  },
+
+  needsBookmarks( steps ) {
+    return steps.length > 0 && steps[ 0 ].action === "split_bookmarks";
   },
 
   // ---- where it runs ---------------------------------------------------------
@@ -97,10 +135,12 @@ const Local = {
     return { supported , cores , memory , capable };
   },
 
-  engine() {
+  engine( steps ) {
     const device = this.device();
     const preference = this.preference();
     if ( !device.supported || preference === "server" ) return "server";
+    // A step only the server can do sends the whole batch there.
+    if ( ( steps || [] ).some( ( step ) => step.options && !ToolOptions.onDevice( step.action , step.options ) ) ) return "server";
     if ( preference === "device" ) return "device";
     return device.capable ? "device" : "server";
   },
@@ -109,9 +149,10 @@ const Local = {
   // batch is under way, which holds the pickers, and, for the server, what
   // happens to the uploads.
   paintEngine() {
-    Dom.get( "local-pick-button" ).disabled = this.running;
-    Dom.get( "local-pick-folder-button" ).disabled = this.running;
-    Dom.show( Dom.get( "local-keep-row" ) , this.engine() === "server" );
+    const empty = this.tool === "chain" && this.plannedSteps().length === 0;
+    Dom.get( "local-pick-button" ).disabled = this.running || empty;
+    Dom.get( "local-pick-folder-button" ).disabled = this.running || empty;
+    Dom.show( Dom.get( "local-keep-row" ) , this.engine( this.running ? this.steps : this.plannedSteps() ) === "server" );
     Dom.get( "local-keep" ).disabled = this.running;
   },
 
@@ -161,8 +202,16 @@ const Local = {
     const skipped = chosen.length - pdfs.length;
     if ( skipped > 0 ) Dom.toast( I18n.get( "library.skipped" ).replace( "{count}" , skipped ) , "error" );
     if ( pdfs.length === 0 || this.running ) return;
-    if ( this.engine() === "server" ) this.startServer( pdfs );
-    else this.start( pdfs.map( ( item ) => item.file ) );
+    const steps = this.plannedSteps();
+    if ( steps.length === 0 ) {
+      Dom.toast( I18n.get( "chain.empty" ) , "error" );
+      return;
+    }
+    this.batchTool = this.tool;
+    // A single tool's options are asked for once the PDFs are read; a chain's
+    // are known now, and may already say it has to run on the server.
+    if ( this.engine( steps ) === "server" ) this.startServer( pdfs , steps );
+    else this.start( pdfs.map( ( item ) => item.file ) , steps );
   },
 
   // ---- the worker -------------------------------------------------------------
@@ -207,7 +256,8 @@ const Local = {
     if ( this.where === "server" ) {
       this.jobs.forEach( ( job ) => {
         job.cancelled = true;
-        if ( job.runId && [ "queued" , "splitting" ].includes( job.state ) ) Api.cancelRun( job.runId ).catch( () => {} );
+        if ( job.chainId && [ "queued" , "splitting" ].includes( job.state ) ) Api.cancelChain( job.chainId ).catch( () => {} );
+        else if ( job.runId && [ "queued" , "splitting" ].includes( job.state ) ) Api.cancelRun( job.runId ).catch( () => {} );
       } );
       this.wake();
       return;
@@ -224,7 +274,7 @@ const Local = {
     this.urls = [];
     this.cancelled = false;
     this.where = where;
-    this.options = null;
+    this.steps = null;
     this.jobs = jobs;
     Dom.swap( Dom.get( "local-list" ) , ...this.jobs.map( ( job ) => this.jobRow( job ) ) );
     Dom.show( Dom.get( "local-batch" ) , true );
@@ -251,57 +301,85 @@ const Local = {
     this.offer();
   },
 
-  async start( files ) {
+  async start( files , planned ) {
     this.begin( "device" , files.map( ( file ) => ( { file , state: "reading" , outputs: [] , fraction: 0 , name: "" } ) ) );
     this.batchId = Date.now() + "-" + Math.random().toString( 36 ).slice( 2 , 8 );
     await this.busy( async () => {
-      await this.inspectAll();
+      await this.inspectAll( this.needsBookmarks( planned ) );
       const ready = this.jobs.filter( ( job ) => job.state === "waiting" );
-      const options = ready.length && !this.cancelled ? await this.askOptions( ready ) : null;
-      this.options = options;
-      if ( !options ) {
+      const steps = ready.length && !this.cancelled ? await this.askSteps( ready , planned ) : null;
+      this.steps = steps;
+      if ( !steps ) {
         ready.forEach( ( job ) => this.setState( job , "cancelled" ) );
-      } else {
-        for ( const job of ready ) {
-          if ( this.cancelled ) this.setState( job , "cancelled" );
-          else await this.splitOne( job , options );
-        }
+        return;
+      }
+      if ( this.engine( steps ) === "server" ) {
+        // An option chosen in the dialog only the server can do: these PDFs
+        // go there after all.
+        ready.forEach( ( job ) => this.setState( job , "cancelled" ) );
+        await this.startServer( ready.map( ( job ) => ( { file: job.file , folder: "" } ) ) , steps , true );
+        return;
+      }
+      for ( const job of ready ) {
+        if ( this.cancelled ) this.setState( job , "cancelled" );
+        else await this.runOne( job , steps );
       }
     } );
   },
 
+  // The steps to run: a chain's as they are; a single tool's with the
+  // options its dialog answers (null if cancelled).
+  async askSteps( jobs , planned ) {
+    if ( this.batchTool === "chain" ) return planned;
+    const action = planned[ 0 ].action;
+    const options = await ToolOptions.ask( action , jobs , this.lastOptions ? this.lastOptions[ action ] : null );
+    if ( !options ) return null;
+    this.lastOptions = Object.assign( {} , this.lastOptions || {} , { [ action ]: options } );
+    return [ { action , options } ];
+  },
+
   // ---- a batch on the server ---------------------------------------------------
 
-  async startServer( pdfs ) {
+  // known: the steps are settled (a dialog has already been answered), so
+  // none is asked for again. Called from inside busy() then.
+  async startServer( pdfs , planned , known ) {
     const keep = Dom.get( "local-keep" ).value;
     this.begin( "server" , pdfs.map( ( item ) => ( {
       file: item.file , folder: item.folder , keep: keep , tool: true , sent: 0 ,
       state: "sending" , outputs: [] , fraction: 0 , name: "",
       onPaint: ( job ) => this.uploadPainted( job ),
     } ) ) );
-    await this.busy( async () => {
+    const work = async () => {
       await this.uploadAll();
-      await Promise.all( this.jobs.filter( ( job ) => job.state === "reading" ).map( ( job ) => this.waitRead( job ) ) );
+      const bookmarks = this.needsBookmarks( planned );
+      await Promise.all( this.jobs.filter( ( job ) => job.state === "reading" ).map( ( job ) => this.waitRead( job , bookmarks ) ) );
       const ready = this.jobs.filter( ( job ) => job.state === "waiting" );
-      const options = ready.length && !this.cancelled ? await this.askOptions( ready ) : null;
-      this.options = options;
-      if ( !options ) {
+      const steps = !ready.length || this.cancelled ? null : known ? planned : await this.askSteps( ready , planned );
+      this.steps = steps;
+      if ( !steps ) {
         ready.forEach( ( job ) => this.setState( job , "cancelled" ) );
         return;
       }
-      const started = await Api.startActionMany( ready.map( ( job ) => job.id ) , this.tool , options );
+      const ids = ready.map( ( job ) => job.id );
+      const started = this.batchTool === "chain"
+        ? await Api.startChains( ids , steps )
+        : await Api.startActionMany( ids , steps[ 0 ].action , steps[ 0 ].options );
+      const made = started.chains || started.runs;
       ready.forEach( ( job ) => {
-        const run = started.runs.find( ( one ) => one.file_id === job.id );
-        const refused = started.skipped.find( ( one ) => one.file_id === job.id );
-        if ( run ) {
-          job.runId = run.id;
+        const one = made.find( ( item ) => item.file_id === job.id );
+        const refused = started.skipped.find( ( item ) => item.file_id === job.id );
+        if ( one ) {
+          if ( started.chains ) job.chainId = one.id;
+          else job.runId = one.id;
           this.setState( job , "queued" );
         } else {
           this.setState( job , "failed" , refused ? refused.error : "failed" );
         }
       } );
       await this.follow();
-    } );
+    };
+    if ( known ) await work();
+    else await this.busy( work );
   },
 
   // Library.upload calls this for each step of an upload it sends for us;
@@ -333,7 +411,7 @@ const Local = {
 
   // Until the server has had its first look at an upload: is it a PDF, how
   // deep do its bookmarks go.
-  async waitRead( job ) {
+  async waitRead( job , bookmarks ) {
     while ( !this.cancelled ) {
       let found;
       try {
@@ -348,7 +426,8 @@ const Local = {
       }
       if ( found.pdf_state === "ok" ) {
         job.info = { levels: found.levels , bookmarks: found.bookmarks , pages: found.pages };
-        this.setState( job , found.bookmarks > 0 ? "waiting" : "failed" , found.bookmarks > 0 ? "" : "no_bookmarks" );
+        const fits = !bookmarks || found.bookmarks > 0;
+        this.setState( job , fits ? "waiting" : "failed" , fits ? "" : "no_bookmarks" );
         return;
       }
       await this.nap( "work:files" );
@@ -359,12 +438,12 @@ const Local = {
   // The server's runs for this batch, read again each time the stream says a
   // run moved (or every pollMs), until none is still going.
   async follow() {
-    const going = () => this.jobs.filter( ( job ) => job.runId && [ "queued" , "splitting" ].includes( job.state ) );
+    const going = () => this.jobs.filter( ( job ) => ( job.runId || job.chainId ) && [ "queued" , "splitting" ].includes( job.state ) );
     while ( going().length > 0 ) {
       for ( const job of going() ) {
         let detail;
         try {
-          detail = await Api.run( job.runId );
+          detail = job.chainId ? this.chainAsRun( await Api.chain( job.chainId ) ) : await Api.run( job.runId );
         } catch ( error ) {
           this.setState( job , "failed" , "failed" );
           continue;
@@ -387,6 +466,20 @@ const Local = {
       }
       if ( going().length > 0 ) await this.nap( "work:runs" );
     }
+  },
+
+  // A chain's detail in the shape follow() reads a run's: running is
+  // running once any step has started, and its step is "Step 2 of 3".
+  chainAsRun( chain ) {
+    const started = chain.step_runs.filter( ( run ) => run.state !== "queued" );
+    const step = started.length ? Math.max( ...started.map( ( run ) => run.step_index ) ) + 1 : 1;
+    const states = { running: started.length ? "running" : "queued" , done: "done" , failed: "failed" , cancelled: "cancelled" };
+    const failed = chain.step_runs.find( ( run ) => run.state === "failed" );
+    return {
+      state: states[ chain.state ] , progress: chain.progress , files: chain.files , message: chain.message || ( failed ? failed.message : "" ),
+      step: I18n.get( "local.chain_step" ).replace( "{step}" , step ).replace( "{count}" , chain.steps.length ),
+      result: null,
+    };
   },
 
   // Until the stream says name happened, pollMs passes, or Stop is pressed.
@@ -412,8 +505,8 @@ const Local = {
 
   restartable( job ) {
     if ( this.running || ![ "cancelled" , "failed" ].includes( job.state ) ) return false;
-    if ( this.where === "server" ) return Boolean( job.runId );
-    return Boolean( this.options && job.info && job.info.bookmarks > 0 );
+    if ( this.where === "server" ) return Boolean( job.runId || job.chainId );
+    return Boolean( this.steps && job.info && ( !this.needsBookmarks( this.steps ) || job.info.bookmarks > 0 ) );
   },
 
   async restart( job ) {
@@ -427,16 +520,17 @@ const Local = {
     }
     await this.busy( async () => {
       if ( this.where === "server" ) {
-        await Api.restartRun( job.runId );
+        if ( job.chainId ) await Api.restartChain( job.chainId );
+        else await Api.restartRun( job.runId );
         this.setState( job , "queued" );
         await this.follow();
       } else {
-        await this.splitOne( job , this.options );
+        await this.runOne( job , this.steps );
       }
     } );
   },
 
-  async inspectAll() {
+  async inspectAll( bookmarks ) {
     for ( const job of this.jobs ) {
       if ( this.cancelled ) {
         this.setState( job , "cancelled" );
@@ -444,7 +538,7 @@ const Local = {
       }
       try {
         job.info = await this.call( { type: "inspect" , file: job.file } );
-        if ( job.info.bookmarks === 0 ) this.setState( job , "failed" , "no_bookmarks" );
+        if ( bookmarks && job.info.bookmarks === 0 ) this.setState( job , "failed" , "no_bookmarks" );
         else this.setState( job , "waiting" );
       } catch ( error ) {
         this.setState( job , this.cancelled ? "cancelled" : "failed" , error.message );
@@ -452,40 +546,14 @@ const Local = {
     }
   },
 
-  // The same dialog as the server's split (library.js), answering the options.
-  async askOptions( jobs ) {
-    const depth = Math.max( ...jobs.map( ( job ) => job.info.levels.length ) );
-    const levels = Array.from( { length: depth } , ( unused , index ) => {
-      const label = I18n.get( "split.level_option" ).replace( "{level}" , index + 1 );
-      const counts = jobs.length === 1 ? I18n.get( "split.level_count" ).replace( "{count}" , jobs[ 0 ].info.levels[ index ] ) : "";
-      return { value: String( index + 1 ) , label: label + counts };
-    } );
-    const title = jobs.length === 1
-      ? I18n.get( "split.title_one" ).replace( "{name}" , jobs[ 0 ].file.name )
-      : I18n.get( "split.title_many" ).replace( "{count}" , jobs.length );
-    let chosen = null;
-    const answered = await Dom.form( {
-      title: title,
-      submit: I18n.get( "split.start" ),
-      fields: [
-        { name: "level" , label: I18n.get( "split.level" ) , type: "select" , options: levels , value: "1" , help: I18n.get( "split.level_help" ) },
-        { name: "front_matter" , label: I18n.get( "split.front_matter" ) , type: "checkbox" , value: true },
-        { name: "inner_bookmarks" , label: I18n.get( "split.inner_bookmarks" ) , type: "checkbox" , value: true },
-        { name: "numbered" , label: I18n.get( "split.numbered" ) , type: "checkbox" , value: true },
-      ],
-      save: ( values ) => { chosen = Object.assign( {} , values , { level: Number( values.level ) } ); },
-    } );
-    return answered ? chosen : null;
-  },
-
-  async splitOne( job , options ) {
+  async runOne( job , steps ) {
     this.setState( job , "splitting" );
     try {
       const index = this.jobs.indexOf( job );
       // Each section is read back from disk as it comes; the split can say
       // it is done before the last read has finished.
       const adding = [];
-      job.result = await this.call( { type: "split" , file: job.file , options: options , store: this.store , batch: this.batchId , job: "file-" + index } , ( data ) => adding.push( ( async () => {
+      job.result = await this.call( { type: "run" , file: job.file , steps: steps , store: this.store , batch: this.batchId , job: "file-" + index } , ( data ) => adding.push( ( async () => {
         if ( data.type === "progress" ) {
           job.fraction = data.fraction;
           job.name = data.name;
@@ -569,7 +637,10 @@ const Local = {
   async downloadAll() {
     const outputs = this.outputs();
     if ( this.where === "server" ) {
-      this.save( Api.runsDownloadPath( this.jobs.filter( ( job ) => job.outputs.length ).map( ( job ) => job.runId ) ) );
+      const made = this.jobs.filter( ( job ) => job.outputs.length );
+      this.save( made.some( ( job ) => job.chainId )
+        ? Api.chainsDownloadPath( made.map( ( job ) => job.chainId ) )
+        : Api.runsDownloadPath( made.map( ( job ) => job.runId ) ) );
       return;
     }
     const several = this.jobs.filter( ( job ) => job.outputs.length ).length > 1;
@@ -586,7 +657,8 @@ const Local = {
         this.urls.push( url );
         const name = several
           ? I18n.get( "local.zip_many" ).replace( "{count}" , outputs.length )
-          : I18n.get( "local.zip_one" ).replace( "{name}" , this.jobs.find( ( job ) => job.outputs.length ).file.name.replace( /\.pdf$/i , "" ) );
+          : I18n.get( "local.zip_one" ).replace( "{name}" , this.jobs.find( ( job ) => job.outputs.length ).file.name.replace( /\.pdf$/i , "" ) )
+            .replace( "{what}" , I18n.get( "local.zip_names." + this.batchTool ) || "files" );
         this.save( url , name );
       } catch ( error ) {
         App.showError( error.message );
@@ -687,6 +759,11 @@ const Local = {
     const notes = [];
     if ( job.result && job.result.folded ) notes.push( I18n.get( "local.folded" ).replace( "{count}" , job.result.folded ) );
     if ( job.result && job.result.nowhere ) notes.push( I18n.get( "local.nowhere" ).replace( "{count}" , job.result.nowhere ) );
+    if ( job.result && typeof job.result.before === "number" ) {
+      notes.push( job.result.after < job.result.before
+        ? I18n.get( "local.smaller" ).replace( "{before}" , Files.size( job.result.before ) ).replace( "{after}" , Files.size( job.result.after ) )
+        : I18n.get( "local.no_smaller" ) );
+    }
     Dom.text( row.note , notes.join( " " ) );
     Dom.show( row.note , notes.length > 0 );
     // New sections are added below the ones already shown, never redrawn.

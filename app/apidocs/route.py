@@ -8,6 +8,7 @@
         "POST /api/admin/users", summary="Create an account",
         tag="Admin", role=ADMIN, status=201,
         description="Make a new account and its first login link, to hand to the person.",
+        mcp="admin_create_user", call=with_login_url,
     )
     def create_user(request: Request, body: CreateUser) -> CreateUserReply:
         ...

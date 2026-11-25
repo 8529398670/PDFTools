@@ -49,6 +49,11 @@ import os
 import secrets
 import shutil
 import threading
+
+try:
+    import fcntl
+except ImportError:  # Windows: one process at a time
+    fcntl = None  # type: ignore[assignment]
 import time
 import unicodedata
 from dataclasses import dataclass, field
@@ -747,9 +752,54 @@ def _remove_strays(store: Store, cfg: Config) -> int:
 
 # ---- shared bytes ------------------------------------------------------------
 
-# Held while a blob is made, joined or removed, so two files with the same new
-# content make one blob, and the sweep never removes one being joined.
-_blob_lock = threading.RLock()
+class BlobLock:
+    """Held while a blob is made, joined or removed, so two files with the
+    same new content make one blob, and the sweep never removes one being
+    joined. A thread lock for this process and, once use_dir has named the
+    app directory, an flock on blobs.lock there for every other process on
+    it: the web server and a worker (`python -m app worker`, perhaps in
+    another container on the same data directory) both make blobs.
+    Re-entrant, as the sweep takes it inside a call that holds it."""
+
+    NAME = "blobs.lock"
+
+    def __init__(self) -> None:
+        self._thread = threading.RLock()
+        self._depth = 0
+        self._path: Path | None = None
+        self._descriptor: int | None = None
+
+    def use_dir(self, app_dir: Path) -> None:
+        self._path = app_dir / self.NAME
+
+    def __enter__(self) -> "BlobLock":
+        self._thread.acquire()
+        if self._depth == 0 and self._path is not None and fcntl is not None:
+            try:
+                self._descriptor = os.open(self._path, os.O_RDWR | os.O_CREAT, 0o600)
+                fcntl.flock(self._descriptor, fcntl.LOCK_EX)
+            except OSError:
+                if self._descriptor is not None:
+                    os.close(self._descriptor)
+                self._descriptor = None
+        self._depth += 1
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._depth -= 1
+        if self._depth == 0 and self._descriptor is not None:
+            os.close(self._descriptor)  # closing drops the flock
+            self._descriptor = None
+        self._thread.release()
+
+
+_blob_lock = BlobLock()
+
+
+def use_lock_dir(app_dir: Path) -> None:
+    """Share the blob lock with every process on app_dir. Called by the server
+    and the worker at start."""
+    _blob_lock.use_dir(app_dir)
 
 
 class Fingerprinter:

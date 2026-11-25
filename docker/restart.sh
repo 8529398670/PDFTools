@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Restart the running container, without rebuilding.
+# Restart the running containers (the server's, then the worker's), without
+# rebuilding.
 #
 # The container is the one the last docker/run.sh started (load_last_deployment
 # in docker/lib.sh). Use it to pick up a config.yaml an editor replaced rather
@@ -19,5 +20,10 @@ load_last_deployment
 echo "Restarting ${docker_container}..."
 docker restart "$docker_container" >/dev/null
 wait_healthy
+if [ -n "$( docker ps -aq --filter "name=^${docker_worker_container:-none}\$" )" ]; then
+  echo "Restarting ${docker_worker_container} (its runs go back in the queue)..."
+  docker restart --time "$WORKER_STOP_WAIT" "$docker_worker_container" >/dev/null
+  wait_worker_healthy || true
+fi
 echo ""
 echo "Ready: ${docker_url}"

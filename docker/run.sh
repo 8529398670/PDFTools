@@ -234,6 +234,15 @@ if [ "$DATA_SHARED" != "true" ]; then
   exit 1
 fi
 
+# The worker goes first, handing its runs back to the queue, so nothing is
+# half written while the server is replaced. The last deployment's worker
+# name is used if docker.worker_container changed since.
+if [ -f "$DOCKER_LAST" ]; then
+  LAST_WORKER="$( sed -n "s/^docker_worker_container=//p" "$DOCKER_LAST" | tr -d "'\"" )"
+  [ -n "$LAST_WORKER" ] && [ "$LAST_WORKER" != "$docker_worker_container" ] && stop_worker "$LAST_WORKER"
+fi
+stop_worker
+
 EXISTING="$( docker ps -a --filter "name=^${docker_container}\$" --format '{{.Status}}' )"
 if [ -n "$EXISTING" ]; then
   echo "Replacing the existing ${docker_container} container (${EXISTING})..."
@@ -289,10 +298,24 @@ wait_healthy
 mkdir -p .run
 printf '%s\n' "$DOCKER_SETTINGS" > "$DOCKER_LAST"
 
+# The worker (files.separate_worker): its own image and container, replaced on
+# every run like the server's. One that fails to build or start leaves the
+# server running; runs wait in the queue until a worker takes them.
+WORKER_NOTE="off (files.separate_worker is false: the server runs actions itself)"
+if [ "$docker_worker" = "true" ]; then
+  if build_worker_image && start_worker && wait_worker_healthy; then
+    WORKER_NOTE="${docker_worker_container} (${docker_worker_cpus} CPUs, ${docker_worker_memory}): docker logs -f ${docker_worker_container}"
+  else
+    WORKER_NOTE="FAILED (above): runs wait in the queue until a worker starts"
+    echo "WARNING: the worker did not start. The server is running without it." >&2
+  fi
+fi
+
 cat <<NOTE
 
 Ready: ${docker_url}
        (from ${docker_url_source})
+Worker: ${WORKER_NOTE}
 
 Three things on the host make up this deployment:
 

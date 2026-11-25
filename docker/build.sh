@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build the container image.
+# Build the container images: the server's, and the worker's when
+# files.separate_worker is on.
 #
 # Split from docker/run.sh so that building and running are separately
 # runnable: CI builds without starting anything, and a redeploy that only
@@ -17,3 +18,6 @@ cd "$( dirname "${BASH_SOURCE[0]}" )/.."
 
 source docker/lib.sh
 build_image "$@"
+if [ "$docker_worker" = "true" ]; then
+  build_worker_image
+fi

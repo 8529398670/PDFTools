@@ -530,6 +530,35 @@ docs:
   loading: "Loading..."
   failed: "The reference could not be loaded. Sign in, then try again."
 
+# The MCP card on Account (static/js/mcp.js): an API key set up for an agent.
+mcp:
+  heading: "MCP: Claude and other agents"
+  description: "Connect Claude Code, Claude Desktop or any other MCP client to this app. It signs in with an API key, so the agent can do what your account can and no more."
+  # Under the description, with a link to the MCP reference: config/mcp.json
+  # in app.repo, or this server's own copy.
+  spec_text: "What an agent can call:"
+  spec_link: "MCP reference (mcp.json)"
+  # Beside it: the same reference as tables, config/mcp.md, on the repository's
+  # site when app.repo is set, else on this server's /docs/mcp page.
+  doc_link: "readable version (mcp.md)"
+  endpoint_label: "Endpoint"
+  client_label: "Set up for"
+  # Also the name a new key is given, until someone types another.
+  client_claude_code: "Claude Code"
+  client_claude_desktop: "Claude Desktop"
+  client_json: "Other"
+  hint_claude_code: "Run this in a terminal. Add --scope user to have it in every project."
+  hint_claude_desktop: "Add this to claude_desktop_config.json (Settings, Developer, Edit Config), then restart Claude Desktop. It needs Node.js, for npx."
+  hint_json: "The usual shape for any other client (Cursor, VS Code, ...): an HTTP server with one Authorization header. Claude Code also reads it from .mcp.json in a project."
+  name_label: "Key name"
+  create_button: "Create key"
+  # Stands in for the key in the setup until one is made here.
+  placeholder_key: "YOUR_API_KEY"
+  # {name} is the key's name.
+  key_notice: "Your new key is in the setup below. Copy it now: the key is shown once. It is in your API keys as {name}, to revoke there."
+  forget_label: "Forget the key"
+  copy_button: "Copy"
+
 # The About screen (static/js/about.js), in the menu while app.show_about is on.
 about:
   heading: "About"
@@ -537,6 +566,8 @@ about:
   source: "Source"
   api_reference: "API reference"
   api_link: "api.json"
+  mcp_reference: "MCP reference"
+  mcp_link: "mcp.json"
 # The Files screen (static/js/files.js). {name} is the file's name, {percent} how
 # much has gone up, and {count} a number.
 # The Library screen (static/js/library.js). Placeholders in {braces} are
@@ -608,10 +639,8 @@ tools:
   count: "{count}"
   open: "Open"
   back: "All tools"
-  # The badge on each tool: where it runs for you now.
-  where_device: "This device"
-  where_server: "Server"
   sections:
+    chain: "Chains"
     split: "Split"
     merge: "Merge"
     convert: "Convert"
@@ -653,6 +682,9 @@ tools:
     images_to_pdf:
       title: "Convert images to PDF"
       help: "Make one PDF from JPEG and PNG images."
+    chain:
+      title: "Chain tools"
+      help: "Run several tools one after another, such as rotate, split, then compress each part."
     compress:
       title: "Compress"
       help: "Make a PDF smaller."
@@ -699,15 +731,15 @@ tool_modes:
 # {cores} and {memory} are this device's.
 local:
   auto_device: "Automatic picks this device ({cores} cores{memory})."
-  auto_server: "Automatic picks the server: this device has {cores} cores{memory}, and splitting here wants at least 4 cores and 4 GB."
+  auto_server: "Automatic picks the server: this device has {cores} cores{memory}, and running tools here wants at least 4 cores and 4 GB."
   memory: ", {gb} GB"
-  unsupported: "This browser cannot split on this device, so splits run on the server."
+  unsupported: "This browser cannot run tools on this device, so they run on the server."
   # While a PDF goes up to the server: checking whether it is there already,
   # then sending it.
   checking: "Checking {percent}%"
   uploading: "Uploading {percent}%"
   queued: "Queued on the server"
-  keep_label: "After the split, your uploaded PDF is"
+  keep_label: "After the run, your uploaded PDF is"
   keep_run: "deleted right away"
   keep_day: "kept for 24 hours"
   keep_policy: "kept as your retention setting says"
@@ -715,21 +747,32 @@ local:
   downloading: "Downloading {name}."
   download_again: "Download again"
   ready: "{count} files are ready."
-  zip_one: "{name} - sections.zip"
+  # {name} is the PDF's, {what} what the tool made of it (zip_names).
+  zip_one: "{name} - {what}.zip"
+  zip_names:
+    split_bookmarks: "sections"
+    rotate: "rotated"
+    compress: "compressed"
+    chain: "files"
   zip_many: "PDFTools - {count} files.zip"
   reading: "Reading"
   waiting: "Waiting"
-  # {percent} done, on {name}: the section being written.
+  # {percent} done, on {name}: the file being written.
   splitting: "{percent}% · {name}"
-  done: "{count} sections · {size}"
+  done: "{count} files · {size}"
   folded: "Folded into the section starting on the same page: {count}."
   nowhere: "Bookmarks that point nowhere, left out: {count}."
-  show_sections: "Sections"
+  show_sections: "Files"
+  # Compress's result. {before} and {after} are sizes.
+  smaller: "{before} → {after}."
+  no_smaller: "It was as small as this can make it; kept as it was."
+  # A chain's line: {step} of {count}.
+  chain_step: "Step {step} of {count}"
   no_bookmarks: "No bookmarks to split at"
   failed: "Failed: {reason}"
   cancelled: "Cancelled"
-  summary_running: "Splitting {done} of {count}"
-  summary_finished: "Split {done} of {count}"
+  summary_running: "Working on {done} of {count}"
+  summary_finished: "Finished {done} of {count}"
   cancel: "Stop"
   download_all: "Download all (.zip)"
   save_folder: "Save all to a folder"
@@ -740,7 +783,10 @@ local:
     password: "Needs a password"
     damaged: "Cannot be read"
     no_bookmarks: "No bookmarks to split at"
-    qpdf_failed: "qpdf could not write a section"
+    qpdf_failed: "qpdf could not write the file"
+    bad_pages: "Those pages are not in this PDF"
+    server_only: "This option runs on the server only"
+    unknown_action: "That tool is not here"
     memory: "This device ran out of memory. Try the server instead."
     upload: "The upload did not finish"
     not_readable: "Cannot be read"
@@ -754,13 +800,59 @@ actions:
   split_bookmarks:
     name: "Split by bookmarks"
     summary: "level {level}"
+  rotate:
+    name: "Rotate"
+    # {angle} in degrees, {pages} as typed ("all" for every page).
+    summary: "{angle}°, pages {pages}"
+  compress:
+    name: "Compress"
+    summary_lossless: "lossless"
+    summary_images: "pictures at {dpi} dpi"
+
+# Each tool's options, in the dialog a tool screen asks before it runs and in
+# a chain's steps (static/js/tool_options.js).
+options:
+  rotate_title_one: "Rotate {name}"
+  rotate_title_many: "Rotate {count} PDFs"
+  rotate_start: "Rotate"
+  angle: "Turn pages"
+  angle_90: "90° clockwise"
+  angle_180: "180°"
+  angle_270: "90° counter-clockwise"
+  pages: "Pages"
+  pages_help: 'Such as 1-3, 7, 10-. Leave empty for every page.'
+  compress_title_one: "Compress {name}"
+  compress_title_many: "Compress {count} PDFs"
+  compress_start: "Compress"
+  level: "How"
+  level_lossless: "Lossless: everything looks the same"
+  level_images: "Also shrink pictures (smaller, runs on the server)"
+  image_dpi: "Pictures keep at most (dpi)"
+  image_dpi_help: "150 reads well on screen; 300 prints well."
+  split_level: "Split at bookmark level"
+  split_level_help: "Level 1 is the top of the outline. A chain cannot look at the PDF first, so pick the level you know it has."
+
+# The chain screen (static/js/chain.js): the steps, then the drop zone.
+chain:
+  steps_heading: "Steps"
+  steps_help: "Each step runs on every file the step before made: split, then compress, compresses every section."
+  add: "Add a step"
+  add_label: "Tool to add"
+  remove: "Remove"
+  up: "Move up"
+  down: "Move down"
+  edit: "Change"
+  step: "{number}. {tool}"
+  empty: "Add at least one step, then drop PDFs below."
+  edit_title: "Step {number}: {tool}"
+  too_many: "A chain holds at most {count} steps."
 
 # The Runs screen (static/js/runs.js).
 runs:
   heading: "Runs"
   description: "What your actions are doing and what they made. Download the sections one at a time, or all of them as one zip."
   search_label: "Search runs"
-  empty: "Nothing has been run yet. Split a PDF from the Library."
+  empty: "Nothing has been run yet. Pick a tool from Tools."
   table_file: "PDF"
   table_action: "Action"
   table_state: "State"
@@ -781,6 +873,8 @@ runs:
   hide_button: "Hide files"
   delete_button: "Delete"
   restart_button: "Restart"
+  # A run that is a step of a chain. {step} counts from 1.
+  chain_step: "chain step {step}"
   section_pages: "{count} pages"
   loading: "Loading"
   errors:

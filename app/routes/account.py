@@ -22,6 +22,7 @@ from app.models import api_keys
 from app.models import themes
 from app.models import two_factor
 from app.routes.api_docs_md import api_doc_url
+from app.routes.api_docs_md import mcp_doc_url
 from app.routes.admin import CancelLoginLinkReply, DisplayName, ExpiresInMinutes, LoginLink, LoginLinkReply, MaxUses, OkReply, RenameUserReply, link_options, link_reply
 from app.routes.admin import key_login_link_options
 from app.routes.helpers import refuse_key_born
@@ -29,6 +30,7 @@ from app.routes.helpers import Refused, get_config, get_store, run
 from app.routes.helpers import DateTime
 from app.routes.logs import audit
 from app.routes.themes import Theme, theme_list
+from app.routes.mcp_tools_accounts import with_login_url
 
 
 class MeKey(Reply, kw_only=True):
@@ -69,7 +71,9 @@ class Me(Reply, kw_only=True):
     description: Annotated[str, Meta(description="app.description. Empty when there is none.")]
     show_about: Annotated[bool, Meta(description="app.show_about: whether the menu has About.", extra_json_schema={"x-feature": "about"})]
     openapi_url: Annotated[str, Meta(description="Where to read this API's reference: config/api.json in app.repo, or /api/api.json when there is no repo.", extra_json_schema={"x-feature": "openapi"})]
+    mcp_url: Annotated[str, Meta(description="Where to read the MCP reference: config/mcp.json in app.repo, or /api/mcp.json when there is no repo. Only with server.mcp on.", extra_json_schema={"x-feature": "mcp"})]
     api_doc_url: Annotated[str, Meta(description="Where to read the API reference as a page for people: config/api.md in app.repo, or /docs/api when there is no repo.", extra_json_schema={"x-feature": "openapi"})]
+    mcp_doc_url: Annotated[str, Meta(description="Where to read the MCP tools as a page for people: config/mcp.md in app.repo, or /docs/mcp when there is no repo.", extra_json_schema={"x-feature": "mcp"})]
     shortcuts: Annotated[dict[str, str], Meta(description="The keyboard shortcuts you changed, by action. Mod is Cmd on a Mac and Ctrl elsewhere.", extra_json_schema={"x-feature": "shortcuts"})]
     tool_modes: Annotated[dict[str, str], Meta(description="Where your tools run: \"*\" is your default, and a tool id its own override; each is auto, device or server. Missing: auto, and a tool follows your default.")]
     themes: Annotated[list[Theme] | None, Meta(description="Your themes (see the Theme schema): your own list, else the app's defaults, else null for the built-in ones.", extra_json_schema={"x-feature": "appearance"})]
@@ -80,6 +84,7 @@ class Me(Reply, kw_only=True):
     two_factor_enabled: Annotated[bool, Meta(extra_json_schema={"x-feature": "two_factor"})]
     auth: str
     api_keys_enabled: Annotated[bool, Meta(extra_json_schema={"x-feature": "api_keys"})]
+    mcp_enabled: Annotated[bool, Meta(description="server.mcp: whether POST /mcp answers.", extra_json_schema={"x-feature": "mcp"})]
     files_enabled: Annotated[bool, Meta(description="files.enabled: whether the Files screen and routes are on.", extra_json_schema={"x-feature": "files"})]
     logs_enabled: Annotated[bool, Meta(extra_json_schema={"x-feature": "logs"})]
     logs_ui_clicks: Annotated[bool, Meta(extra_json_schema={"x-feature": "logs"})]
@@ -95,6 +100,7 @@ class Me(Reply, kw_only=True):
     tag="Account",
     description="The account this API key belongs to, the role it acts with (role -- never higher than the "
     "key's own scope), and the account's own role.",
+    mcp="whoami", read_only=True,
 )
 def me(request: Request) -> Me:
     """The frontend's first call on every page load: it answers "who am I,
@@ -134,7 +140,9 @@ def me(request: Request) -> Me:
         description=cfg.description,
         show_about=cfg.show_about,
         openapi_url=open_api_url(cfg),
+        mcp_url=mcp_url(cfg),
         api_doc_url=api_doc_url(cfg),
+        mcp_doc_url=mcp_doc_url(cfg),
         shortcuts=actor.user.shortcuts,
         tool_modes=actor.user.tool_modes,
         themes=theme_list(my_themes),
@@ -145,6 +153,7 @@ def me(request: Request) -> Me:
         two_factor_enabled=cfg.two_factor_enabled,
         auth=actor.method,
         api_keys_enabled=cfg.api_keys_enabled,
+        mcp_enabled=cfg.mcp_enabled,
         files_enabled=cfg.files.enabled,
         # Whether track.js sends anything, and whether it sends clicks.
         logs_enabled=cfg.logs.enabled,
@@ -204,6 +213,12 @@ def open_api_url(cfg: Config) -> str:
     return repo_file(cfg, "config/api.json") or "/api/api.json"
 
 
+def mcp_url(cfg: Config) -> str:
+    """Where the MCP reference is read: config/mcp.json in app.repo when that
+    is set, else this server's own copy, which needs the same sign-in."""
+    return repo_file(cfg, "config/mcp.json") or "/api/mcp.json"
+
+
 class Rename(RequestType):
     display_name: DisplayName
     expect: str | None = None
@@ -215,6 +230,7 @@ class Rename(RequestType):
     description="Change your own display name (1-80 characters). expect, when given, is the name you think "
     "it has now; if someone changed it meanwhile the rename is refused with the current name, so nothing is "
     "overwritten unseen.",
+    mcp="rename_account",
 )
 def rename(request: Request, body: Rename) -> RenameUserReply:
     """Rename yourself, over HTTP or the MCP rename_account tool. expect is
@@ -244,6 +260,11 @@ class MyLoginLink(RequestType):
     description="A link that signs your own account in on a browser or another device. An API key may ask "
     "only if your account let it, from a browser session (POST /api/keys/{key_id}/sign-in); its link works "
     "once, for at most 15 minutes.",
+    mcp_note="Only works if this key was allowed to make sign-in links, on the API keys card. Answers with "
+    "login_url (open it to sign in; it works once, for at most 15 minutes), expires_at and max_uses. Any "
+    "older link the account could still use stops working; its signed-in devices stay signed in. Revoking "
+    "or deleting this API key voids the link while it is unused, and signs out every device it signed in.",
+    mcp="create_my_login_link", call=with_login_url,
 )
 def create_my_login_link(request: Request, body: MyLoginLink) -> LoginLinkReply:
     """Mint a login link for the caller's own account: the way to sign in on
@@ -272,6 +293,7 @@ def create_my_login_link(request: Request, body: MyLoginLink) -> LoginLinkReply:
     tag="Account",
     description="Void your account's live login link without making a new one. Devices it already signed in "
     "stay signed in. Answers with removed: 0 or 1.",
+    mcp="cancel_my_login_link", destructive=True,
 )
 def cancel_my_login_link(request: Request) -> CancelLoginLinkReply:
     """Stop the caller's own live login link working."""

@@ -32,7 +32,9 @@ OPENAPI_SPEC = CODE_ROOT / "config" / "api.json"
 API_DOC = CODE_ROOT / "config" / "api.md"
 # The tools /mcp offers, written by scripts/api_docs.sh. Bundled only, for the
 # same reason as api.json.
+MCP_MANIFEST = CODE_ROOT / "config" / "mcp.json"
 # The same tools as tables for people, which /docs/mcp renders.
+MCP_DOC = CODE_ROOT / "config" / "mcp.md"
 
 
 @dataclass(frozen=True)

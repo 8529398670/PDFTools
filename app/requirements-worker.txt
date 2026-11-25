@@ -1,0 +1,16 @@
+# The worker's packages (`python -m app worker`, app/worker/run.py), for
+# docker/Dockerfile.worker: Debian and Python 3.12, not the server's Alpine
+# 3.14, because the YOLO section finder it is meant to run needs torch,
+# onnxruntime and OpenCV, which ship no musllinux wheels, and RapidOCR caps
+# Python below 3.13.
+#
+# Today it runs the same pikepdf actions as the server, so it takes the
+# server's own pins (one list, never two versions of qpdf). starlette and
+# uvicorn come along unused; they are small and pure Python.
+#
+# When the YOLO card lands, add below (see PaperReferenceManagerAddons'
+# requirements-pipeline.txt): CPU torch from download.pytorch.org/whl/cpu
+# first (the Dockerfile does that), doclayout-yolo, rapidocr-onnxruntime,
+# onnxruntime, huggingface-hub, opencv-python. Their Pillow and numpy pins
+# must then agree with the one here.
+-r requirements.txt

@@ -1,0 +1,64 @@
+# syntax=docker/dockerfile:1
+#
+# The worker (`python -m app worker`, app/worker/run.py) as a container beside
+# the server's. docker/run.sh builds and starts it when files.separate_worker
+# is true, which is the default.
+#
+# Debian and Python 3.12, not the server's Alpine 3.14: the YOLO section
+# finder this container is for needs torch, onnxruntime and OpenCV, which
+# ship no musllinux wheels, and RapidOCR caps Python below 3.13. Until then it
+# runs the same pikepdf actions the server's code defines.
+#
+# It shares only the data directory with the server: the database (SQLite in
+# WAL mode; a claimed run is leased, app/models/runs.py), the stored files
+# and the work directory. It publishes no port and runs with no network.
+
+FROM python:3.12-slim-bookworm
+
+# The same fixed uid/gid as the server's image (docker/Dockerfile), so both
+# containers own the data directory the same way.
+RUN groupadd -g 10001 app \
+ && useradd -u 10001 -g app -d /app -s /usr/sbin/nologin -M app
+
+WORKDIR /app
+
+COPY app/requirements.txt app/requirements-worker.txt ./
+# Every package must arrive as a wheel, as in the server's image.
+RUN pip install --no-cache-dir --only-binary=:all: -r requirements-worker.txt \
+ && python -m pip uninstall --yes --quiet pip \
+ && rm requirements.txt requirements-worker.txt
+
+COPY app ./app
+COPY config/language.yaml config/defaults.yaml config/example_header.yaml ./config/
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_DATE=unknown
+ARG SKILL=
+ARG SKILL_COMMIT=
+
+# The same fixed layout as the server's image: config at
+# /app/config/config.yaml, state in /app/data (app/core/layout.py).
+RUN cp app/core/layout_container.py app/core/layout_pinned.py \
+ && python -c 'import sys; open("app/build_info.py", "w").write("VERSION = %r\nCOMMIT = %r\nBUILD_DATE = %r\nSKILL = %r\nSKILL_COMMIT = %r\n" % tuple(sys.argv[1:6]))' \
+      "$VERSION" "$COMMIT" "$BUILD_DATE" "$SKILL" "$SKILL_COMMIT" \
+ && python -m compileall -q app \
+ && mkdir -p /app/data && chown app:app /app/data
+
+# The container runs --read-only: anything a library caches goes to the
+# tmpfs. The YOLO model will be kept in /app/data/models after its first
+# download.
+ENV HOME=/tmp \
+    HF_HOME=/tmp/hf \
+    YOLO_CONFIG_DIR=/tmp/yolo \
+    MPLCONFIGDIR=/tmp/mpl \
+    PYTHONDONTWRITEBYTECODE=1
+
+USER app
+
+# Healthy while this container's worker has checked in within a minute
+# (it does every 20 seconds); app/worker/run.py healthy.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["python", "-m", "app", "health", "--worker"]
+
+ENTRYPOINT ["python", "-u", "-m", "app", "worker"]

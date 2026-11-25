@@ -3,7 +3,8 @@
     python -m app                    run the web server
     python -m app manage <cmd>       account administration
     python -m app config <cmd>       create, check, or read config.yaml
-    python -m app health             exit 0 if the local server answers
+    python -m app worker             run queued actions (files.separate_worker)
+    python -m app health [--worker]  exit 0 if the local server (or worker) answers
     python -m app version            build information
 
 One entry point for everything, so the server and the tools around it always
@@ -24,7 +25,9 @@ Usage:
   python -m app                 run the web server
   python -m app manage <cmd>    account administration
   python -m app config <cmd>    create, check, or read config.yaml
+  python -m app worker          run queued actions (files.separate_worker)
   python -m app health          exit 0 if the local server answers
+  python -m app health --worker exit 0 if this host's worker checked in lately
   python -m app version         build information
 """
 
@@ -70,6 +73,22 @@ def main(arguments: list[str]) -> None:
 
         try:
             config_command.run(rest)
+        except Exception as error:  # noqa: BLE001
+            fail(error)
+    elif command == "worker":
+        from app.core.config import ConfigError
+        from app.worker import run as worker
+
+        try:
+            worker.main(rest)
+        except (ConfigError, RuntimeError) as error:
+            print(f"[fatal] {error}", file=sys.stderr)
+            sys.exit(1)
+    elif command == "health" and rest == ["--worker"]:
+        from app.worker import run as worker
+
+        try:
+            worker.healthy()
         except Exception as error:  # noqa: BLE001
             fail(error)
     elif command == "health":

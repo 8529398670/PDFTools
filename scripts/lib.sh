@@ -12,6 +12,8 @@ VENV="$( pwd )/.venv"
 PYTHON="${VENV}/bin/python"
 RUN_DIR="$( pwd )/.run"
 PID_FILE="${RUN_DIR}/server.pid"
+# The worker scripts/run.sh starts beside the server (files.separate_worker).
+WORKER_PID_FILE="${RUN_DIR}/worker.pid"
 # Touched after a successful install. app/requirements.txt being newer than it is
 # the signal to install again, so editing the file is all it takes.
 STAMP="${VENV}/.requirements.stamp"
@@ -70,7 +72,7 @@ read_docker_config() {
 is_ours() {
   local cwd
   case "$( ps -p "$1" -o command= 2>/dev/null )" in
-    *" -m app") ;;
+    *" -m app"|*" -m app worker") ;;
     *) return 1 ;;
   esac
   if [ -e "/proc/$1/cwd" ]; then
@@ -95,7 +97,21 @@ our_server_pid() {
 # Stop the server this checkout started, if it is running: TERM, then KILL if
 # it is still there 20 seconds later. Clears the pid file either way.
 stop_our_server() {
-  local pid
+  local pid worker
+  # The worker first: TERM puts the runs it holds back in the queue.
+  if [ -f "$WORKER_PID_FILE" ]; then
+    worker="$( cat "$WORKER_PID_FILE" )"
+    if [ -n "$worker" ] && kill -0 "$worker" 2>/dev/null && is_ours "$worker"; then
+      echo "Stopping the worker this checkout started (pid ${worker})..."
+      kill -TERM "$worker" 2>/dev/null || true
+      for _ in $( seq 1 80 ); do
+        kill -0 "$worker" 2>/dev/null || break
+        sleep 0.25
+      done
+      kill -KILL "$worker" 2>/dev/null || true
+    fi
+    rm -f "$WORKER_PID_FILE"
+  fi
   pid="$( our_server_pid )"
   if [ -n "$pid" ]; then
     echo "Stopping the server this checkout started (pid ${pid}, running since $( ps -p "$pid" -o lstart= 2>/dev/null | sed 's/  */ /g' ))..."

@@ -15,6 +15,7 @@ from app.core import config, config_live, config_secret, layout, yaml_edit
 TEMPLATE_SWITCHES = [
     ("auth.api_keys", True),
     ("auth.two_factor", True),
+    ("server.mcp", True),
     ("files.enabled", True),
 ]
 

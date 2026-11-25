@@ -127,11 +127,8 @@ const Runs = {
   },
 
   actionText( one ) {
-    const name = I18n.get( "actions." + one.action + ".name" ) || one.action;
-    if ( one.action === "split_bookmarks" ) {
-      return name + " · " + I18n.get( "actions.split_bookmarks.summary" ).replace( "{level}" , one.options.level );
-    }
-    return name;
+    const text = ToolOptions.summary( one.action , one.options );
+    return one.chain_id ? text + " · " + I18n.get( "runs.chain_step" ).replace( "{step}" , one.step_index + 1 ) : text;
   },
 
   row( one ) {
@@ -155,7 +152,8 @@ const Runs = {
       text: I18n.get( "ui.cancel" ),
       on: { click: () => this.cancel( one ) },
     } ) : null;
-    const restart = [ "cancelled" , "failed" ].includes( one.state ) ? Dom.el( "button" , {
+    // A chain's step starts again with its chain, on the chain's screen.
+    const restart = [ "cancelled" , "failed" ].includes( one.state ) && !one.chain_id ? Dom.el( "button" , {
       class: "btn btn-sm btn-outline-primary",
       children: [
         Dom.el( "i" , { class: "bi bi-arrow-clockwise me-1" , attrs: { "aria-hidden": "true" } } ),
